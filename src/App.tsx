@@ -22,6 +22,7 @@ import {
   MessageSquareText,
   Monitor,
   Play,
+  Printer,
   RefreshCw,
   SearchCheck,
   Send,
@@ -82,6 +83,7 @@ import {
   writingRubricRows,
   writingRubricStandards,
 } from "./data/mockData";
+import type { ReportTone, WarningStatus } from "./data/mockData";
 import type { PracticeItem, QuestionItem, StudentAttempt } from "./types";
 
 type PanelId =
@@ -113,6 +115,7 @@ const mobileNav = [
   { id: "upload", label: "导入", icon: UploadCloud },
   { id: "diagnosis", label: "错因", icon: SearchCheck },
   { id: "analytics", label: "学情", icon: BarChart3 },
+  { id: "reports", label: "报告", icon: FileText },
   { id: "student", label: "学生", icon: UserRound },
 ] satisfies Array<{ id: PanelId; label: string; icon: typeof LayoutDashboard }>;
 
@@ -327,8 +330,8 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
   };
 };
 
-const downloadTextFile = (content: string, filename: string) => {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+const downloadTextFile = (content: string, filename: string, mime = "text/csv;charset=utf-8") => {
+  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -2106,7 +2109,41 @@ function DiagnosisPanel({
   );
 }
 
+const warningStatusFlow: WarningStatus[] = ["未处理", "已安排", "已复盘"];
+
+const classCompareData = classSnapshots.map((snapshot) => ({
+  name: snapshot.className,
+  平均正确率: Math.round(snapshot.averageAccuracy * 100),
+  完成率: Math.round(snapshot.completionRate * 100),
+  写作达成: Math.round((snapshot.writingScore / 40) * 100),
+}));
+
 function AnalyticsPanel() {
+  const [warningStatusMap, setWarningStatusMap] = useState<Record<string, WarningStatus>>(() =>
+    Object.fromEntries(warningCases.map((item) => [item.student, item.status])),
+  );
+  const [copiedAnalyticsText, setCopiedAnalyticsText] = useState("");
+
+  const cycleWarningStatus = (student: string) => {
+    setWarningStatusMap((prev) => {
+      const current = prev[student] ?? "未处理";
+      const next = warningStatusFlow[(warningStatusFlow.indexOf(current) + 1) % warningStatusFlow.length];
+      return { ...prev, [student]: next };
+    });
+  };
+
+  const handleCopyAnalytics = (kind: string, text: string) => {
+    void navigator.clipboard?.writeText(text);
+    setCopiedAnalyticsText(kind);
+  };
+
+  const lessonPlanText = `讲评课备课单（40分钟）\n\n${reviewLessonPlan
+    .map((item) => `${item.phase} · ${item.title}\n${item.output}`)
+    .join("\n\n")}`;
+  const weeklyPreviewText = reportPreviewItems
+    .map((item) => `【${item.audience}】${item.title}\n${item.detail}`)
+    .join("\n\n");
+
   return (
     <div className="analytics-grid">
       <section className="panel chart-panel wide">
@@ -2217,25 +2254,77 @@ function AnalyticsPanel() {
         </div>
       </section>
 
+      <section className="panel chart-panel wide">
+        <PanelHeader icon={BarChart3} title="班级横向对比" action="正确率 / 完成率 / 写作达成率 %" />
+        <div className="chart-takeaway">
+          高二(7)班整体落后约 5 个百分点且需跟进人数最多，建议备课组优先共享高二(3)班的讲评课设计。
+        </div>
+        <div className="chart-frame">
+          <ResponsiveContainer height={260} width="100%">
+            <BarChart data={classCompareData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+              <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} />
+              <YAxis tickLine={false} axisLine={false} domain={[0, 100]} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="平均正确率" fill="#2563eb" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="完成率" fill="#16a34a" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="写作达成" fill="#f97316" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
       <section className="panel warning-panel">
-        <PanelHeader icon={AlertTriangle} title="学生预警中心" action="连续风险自动入列" />
+        <PanelHeader icon={AlertTriangle} title="学生预警中心" action="点击状态可流转：未处理→已安排→已复盘" />
         <div className="warning-list">
-          {warningCases.map((item) => (
-            <article className={`warning-card level-${item.level}`} key={item.student}>
-              <div className="warning-head">
-                <strong>{item.student}</strong>
-                <span>{item.level}风险</span>
-              </div>
-              <p>{item.reason}</p>
-              <small>{item.action}</small>
-              <b>{item.owner}</b>
-            </article>
-          ))}
+          {warningCases.map((item) => {
+            const status = warningStatusMap[item.student] ?? item.status;
+            return (
+              <article className={`warning-card level-${item.level}`} key={item.student}>
+                <div className="warning-head">
+                  <strong>{item.student}</strong>
+                  <span>{item.level}风险</span>
+                </div>
+                <p>{item.reason}</p>
+                <small>{item.action}</small>
+                <div className="warning-foot">
+                  <b>{item.owner}</b>
+                  <button
+                    className={`warning-status-chip status-${warningStatusFlow.indexOf(status)}`}
+                    onClick={() => cycleWarningStatus(item.student)}
+                    title="点击切换处理状态"
+                    type="button"
+                  >
+                    {status}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
       <section className="panel lesson-plan-panel">
         <PanelHeader icon={ClipboardCheck} title="讲评课备课单" action="课前-课中-课后闭环" />
+        <div className="panel-inline-actions">
+          <button
+            className="secondary-button"
+            onClick={() => handleCopyAnalytics("lesson", lessonPlanText)}
+            type="button"
+          >
+            <ClipboardCheck size={16} />
+            {copiedAnalyticsText === "lesson" ? "已复制备课单" : "复制备课单"}
+          </button>
+          <button
+            className="secondary-button"
+            onClick={() => downloadTextFile(lessonPlanText, "讲评课备课单.md", "text/markdown;charset=utf-8")}
+            type="button"
+          >
+            <Download size={16} />
+            导出教案大纲
+          </button>
+        </div>
         <div className="lesson-brief">
           {reviewLessonPlan.map((item) => (
             <article key={item.phase}>
@@ -2266,7 +2355,25 @@ function AnalyticsPanel() {
       </section>
 
       <section className="panel report-preview-panel full">
-        <PanelHeader icon={Download} title="周报与家校沟通预览" action="可导出摘要" />
+        <PanelHeader icon={Download} title="周报与家校沟通预览" action="可复制 · 可导出" />
+        <div className="panel-inline-actions">
+          <button
+            className="secondary-button"
+            onClick={() => handleCopyAnalytics("weekly", weeklyPreviewText)}
+            type="button"
+          >
+            <ClipboardCheck size={16} />
+            {copiedAnalyticsText === "weekly" ? "已复制摘要" : "复制三版摘要"}
+          </button>
+          <button
+            className="secondary-button"
+            onClick={() => downloadTextFile(weeklyPreviewText, "周报摘要.md", "text/markdown;charset=utf-8")}
+            type="button"
+          >
+            <Download size={16} />
+            下载摘要
+          </button>
+        </div>
         <div className="report-preview-grid">
           {reportPreviewItems.map((item) => (
             <article key={item.audience}>
@@ -2294,13 +2401,40 @@ function ReportsPanel({
 }) {
   const selectedReport =
     reportTemplates.find((item) => item.id === selectedReportId) ?? reportTemplates[0];
-  const reportText = `${selectedReport.title}\n\n${selectedReport.body}\n\n${selectedReport.bullets
+  const [selectedTone, setSelectedTone] = useState<ReportTone>(selectedReport.tone);
+  const toneOptions: ReportTone[] = ["正式", "简洁", "鼓励"];
+  const variant = selectedReport.tones[selectedTone];
+  const reportText = `${selectedReport.title}（${selectedReport.audience} · ${selectedTone}语气）\n\n${variant.body}\n\n${variant.bullets
     .map((item) => `- ${item}`)
     .join("\n")}`;
 
   const handleCopy = () => {
     void navigator.clipboard?.writeText(reportText);
     setCopiedReport(selectedReport.id);
+  };
+
+  const handleSelectReport = (id: string) => {
+    setSelectedReportId(id);
+    const nextReport = reportTemplates.find((item) => item.id === id);
+    if (nextReport) setSelectedTone(nextReport.tone);
+  };
+
+  const handleDownload = () => {
+    downloadTextFile(
+      `# ${reportText}`,
+      `${selectedReport.audience}-${selectedTone}.md`,
+      "text/markdown;charset=utf-8",
+    );
+  };
+
+  const handlePrint = () => {
+    document.body.classList.add("print-report-only");
+    const cleanup = () => {
+      document.body.classList.remove("print-report-only");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    window.print();
   };
 
   return (
@@ -2312,12 +2446,12 @@ function ReportsPanel({
             <button
               className={selectedReport.id === item.id ? "report-type active" : "report-type"}
               key={item.id}
-              onClick={() => setSelectedReportId(item.id)}
+              onClick={() => handleSelectReport(item.id)}
               type="button"
             >
               <span>{item.audience}</span>
               <strong>{item.title}</strong>
-              <small>{item.tone}语气</small>
+              <small>默认{item.tone}语气 · 可切换</small>
             </button>
           ))}
         </div>
@@ -2328,27 +2462,40 @@ function ReportsPanel({
       </section>
 
       <section className="panel report-editor-panel">
-        <PanelHeader icon={MessageSquareText} title={selectedReport.title} action={`${selectedReport.audience} · ${selectedReport.tone}`} />
+        <PanelHeader icon={MessageSquareText} title={selectedReport.title} action={`${selectedReport.audience} · ${selectedTone}语气`} />
         <div className="report-toolbar">
           <button className="primary-button" onClick={handleCopy} type="button">
             <ClipboardCheck size={16} />
             {copiedReport === selectedReport.id ? "已复制" : "复制报告"}
           </button>
-          <button className="secondary-button" type="button">
+          <button className="secondary-button" onClick={handleDownload} type="button">
             <Download size={16} />
-            下载 PDF
+            下载 Markdown
           </button>
-          <button className="secondary-button" type="button">
-            <Sparkles size={16} />
-            改写语气
+          <button className="secondary-button" onClick={handlePrint} type="button">
+            <Printer size={16} />
+            打印 / 存 PDF
           </button>
+          <div className="tone-switch" role="group" aria-label="改写语气">
+            <Sparkles size={14} />
+            {toneOptions.map((tone) => (
+              <button
+                className={selectedTone === tone ? "tone-chip active" : "tone-chip"}
+                key={tone}
+                onClick={() => setSelectedTone(tone)}
+                type="button"
+              >
+                {tone}
+              </button>
+            ))}
+          </div>
         </div>
         <article className="report-document">
-          <span>AI 初稿 · 老师可编辑</span>
+          <span>AI 初稿 · {selectedTone}语气 · 老师可编辑</span>
           <h2>{selectedReport.title}</h2>
-          <p>{selectedReport.body}</p>
+          <p>{variant.body}</p>
           <ul>
-            {selectedReport.bullets.map((item) => (
+            {variant.bullets.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
@@ -2731,6 +2878,40 @@ function StudentPanel({
     profile.riskLevel === "高" ? "high" : profile.riskLevel === "中" ? "medium" : "low";
   const statusClass = (status: string) =>
     status === "已完成" ? "done" : status === "进行中" ? "active" : "pending";
+  const [followUpTasks, setFollowUpTasks] = useState<string[]>([]);
+  const [copiedMistakeBook, setCopiedMistakeBook] = useState(false);
+
+  const handleGenerateFollowUp = () => {
+    const skillTasks = profile.focusSkills.slice(0, 3).map(
+      (skill, index) => `任务${index + 1}：完成「${skill}」专项练习 2 题，每题写出保留与排除选项的证据句。`,
+    );
+    const correctionTasks = wrongAttempts
+      .slice(0, 2)
+      .map((attempt) => {
+        const question = questions.find((item) => item.id === attempt.questionId);
+        return `订正：Q${question?.number ?? "?"} ${question?.questionType ?? ""}（错因：${attempt.cause}），写出正确答案的原文依据。`;
+      });
+    setFollowUpTasks([...skillTasks, ...correctionTasks, `复盘：${profile.nextReview}，目标正确率 80% 以上。`]);
+  };
+
+  const buildMistakeBookText = () => {
+    const entries = wrongAttempts.map((attempt) => {
+      const question = questions.find((item) => item.id === attempt.questionId) ?? questions[0];
+      return [
+        `## Q${question.number} ${question.questionType}（${question.title}）`,
+        `- 我的答案：${attempt.selected}　参考答案：${question.answer}`,
+        `- 错因：${attempt.cause}`,
+        `- 讲解：${question.diagnosis.narrative}`,
+        `- 建议：${question.diagnosis.teachingInsight.suggestion}`,
+      ].join("\n");
+    });
+    return [
+      `# ${selectedStudent?.studentName ?? "匿名学生"} 个人错题本`,
+      `掌握度：${averageMastery}%　跟踪等级：${profile.riskLevel}　下次复盘：${profile.nextReview}`,
+      "",
+      entries.length ? entries.join("\n\n") : "本次暂无错题。",
+    ].join("\n");
+  };
 
   return (
     <div className="student-layout">
@@ -2777,12 +2958,35 @@ function StudentPanel({
             <span className={`risk-badge ${riskTone}`}>{profile.riskLevel}风险</span>
             <strong>{profile.phase}</strong>
             <small>下一次复盘：{profile.nextReview}</small>
-            <button className="ghost-button" type="button">
+            <button className="ghost-button" onClick={handleGenerateFollowUp} type="button">
               <RefreshCw size={16} />
-              生成跟进任务
+              {followUpTasks.length ? "重新生成跟进任务" : "生成跟进任务"}
             </button>
           </div>
         </section>
+
+        {followUpTasks.length > 0 && (
+          <section className="panel follow-up-panel">
+            <PanelHeader icon={ClipboardList} title="AI 跟进任务草稿" action="老师可编辑后布置" />
+            <ol className="follow-up-list">
+              {followUpTasks.map((task) => (
+                <li key={task}>{task}</li>
+              ))}
+            </ol>
+            <div className="panel-inline-actions">
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(followUpTasks.map((task, index) => `${index + 1}. ${task}`).join("\n"));
+                }}
+                type="button"
+              >
+                <ClipboardCheck size={16} />
+                复制任务清单
+              </button>
+            </div>
+          </section>
+        )}
 
         <div className="student-progress-grid">
           <section className="panel">
@@ -2852,6 +3056,33 @@ function StudentPanel({
 
         <section className="panel">
           <PanelHeader icon={BookMarked} title="个人错题本" action="错因解释 + 同类练习" />
+          <div className="panel-inline-actions">
+            <button
+              className="secondary-button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(buildMistakeBookText());
+                setCopiedMistakeBook(true);
+              }}
+              type="button"
+            >
+              <ClipboardCheck size={16} />
+              {copiedMistakeBook ? "已复制错题本" : "复制错题本"}
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() =>
+                downloadTextFile(
+                  buildMistakeBookText(),
+                  `${selectedStudent?.studentName ?? "学生"}-个人错题本.md`,
+                  "text/markdown;charset=utf-8",
+                )
+              }
+              type="button"
+            >
+              <Download size={16} />
+              导出打印版
+            </button>
+          </div>
           <div className="mistake-list">
             {wrongAttempts.length ? (
               wrongAttempts.map((attempt) => {
