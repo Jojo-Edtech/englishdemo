@@ -3947,7 +3947,7 @@ h1 {
     height: 66px;
     padding: 6px 8px 8px;
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     border-top: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.96);
@@ -5330,7 +5330,7 @@ h1 {
 }
 
 .mobile-nav {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 @media (max-width: 1280px) {
@@ -5542,5 +5542,126 @@ h1 {
 
   .mobile-nav button {
     font-size: 10px;
+  }
+}
+
+/* ==== 2026-07 优化新增：语气切换 / 预警状态 / 面板行内操作 / 跟进任务 / 打印 ==== */
+
+.tone-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #dbe3ee;
+  border-radius: 999px;
+  background: #f6f8fc;
+  color: #64748b;
+}
+
+.tone-chip {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tone-chip:hover {
+  color: #1d4ed8;
+}
+
+.tone-chip.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.warning-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.warning-status-chip {
+  border: 1px dashed #cbd5e1;
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.warning-status-chip:active {
+  transform: scale(0.96);
+}
+
+.warning-status-chip.status-0 {
+  color: #b91c1c;
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.warning-status-chip.status-1 {
+  color: #9a3412;
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+
+.warning-status-chip.status-2 {
+  color: #166534;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.panel-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+
+.panel-inline-actions .secondary-button {
+  font-size: 13px;
+  padding: 8px 14px;
+}
+
+.follow-up-panel .follow-up-list {
+  margin: 4px 0 12px;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@media print {
+  body.print-report-only .sidebar,
+  body.print-report-only .topbar,
+  body.print-report-only .mobile-nav,
+  body.print-report-only .report-switch-panel,
+  body.print-report-only .report-delivery-panel,
+  body.print-report-only .report-toolbar {
+    display: none !important;
+  }
+
+  body.print-report-only .app-shell {
+    display: block;
+  }
+
+  body.print-report-only .main {
+    padding: 0;
+  }
+
+  body.print-report-only .report-editor-panel {
+    box-shadow: none;
+    border: none;
   }
 }
