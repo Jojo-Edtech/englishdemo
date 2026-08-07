@@ -564,6 +564,86 @@ export const heatmap = [
 
 export const heatmapColumns = ["主旨", "推断", "细节", "词义", "七选五", "续写"];
 
+export const masteryMatrixSkills = ["信息定位", "推断概括", "词汇语境", "篇章逻辑", "综合读写"] as const;
+
+export const masteryMatrix = [
+  {
+    student: "S02 林同学",
+    risk: "中风险",
+    change: "+5%",
+    summary: "能定位原文，但熟词生义和选项边界验证仍不稳定。",
+    values: { 信息定位: 72, 推断概括: 58, 词汇语境: 49, 篇章逻辑: 56, 综合读写: 62 },
+  },
+  {
+    student: "S07 许同学",
+    risk: "高风险",
+    change: "+2%",
+    summary: "阅读与写作同步波动，长难句和时间策略需要小步跟进。",
+    values: { 信息定位: 63, 推断概括: 48, 词汇语境: 45, 篇章逻辑: 52, 综合读写: 50 },
+  },
+  {
+    student: "S11 罗同学",
+    risk: "低风险",
+    change: "+4%",
+    summary: "基础达成稳定，推断题速度和段落功能判断仍有提升空间。",
+    values: { 信息定位: 78, 推断概括: 61, 词汇语境: 68, 篇章逻辑: 60, 综合读写: 66 },
+  },
+  {
+    student: "S01 陈同学",
+    risk: "低风险",
+    change: "+7%",
+    summary: "各能力点稳定达成，可转入高考拓展与表达迁移。",
+    values: { 信息定位: 86, 推断概括: 74, 词汇语境: 79, 篇章逻辑: 72, 综合读写: 76 },
+  },
+  {
+    student: "S03 黄同学",
+    risk: "低风险",
+    change: "+6%",
+    summary: "阅读证据链完整，适合增加续写语言层级和主题回扣训练。",
+    values: { 信息定位: 88, 推断概括: 76, 词汇语境: 81, 篇章逻辑: 75, 综合读写: 80 },
+  },
+  {
+    student: "S05 周同学",
+    risk: "低风险",
+    change: "+8%",
+    summary: "整体表现稳定，可作为同伴讲解样例并保持限时训练。",
+    values: { 信息定位: 91, 推断概括: 83, 词汇语境: 86, 篇章逻辑: 82, 综合读写: 84 },
+  },
+];
+
+export const masterySkillActions = [
+  {
+    skill: "信息定位",
+    evidence: "核对题干关键词、原文定位句和信息对应关系。",
+    task: "完成 2 道细节定位题，每题标出关键词与对应句。",
+    examLink: "阅读理解 · 快速定位与证据核验",
+  },
+  {
+    skill: "推断概括",
+    evidence: "检查学生是否把局部信息误当作作者意图或全文主旨。",
+    task: "完成 2 道推断题，并写出保留选项与排除选项的依据。",
+    examLink: "阅读理解 · 作者态度、段落功能与选项边界",
+  },
+  {
+    skill: "词汇语境",
+    evidence: "重点查看熟词生义、宾语搭配和上下文语义场。",
+    task: "完成 address / charge / bridge 三组语境义迁移。",
+    examLink: "词义猜测 · 语境义与搭配验证",
+  },
+  {
+    skill: "篇章逻辑",
+    evidence: "核对段落功能、因果链和指代关系是否完整。",
+    task: "完成一篇四段功能图，并为两个干扰项标注边界。",
+    examLink: "主旨与推断 · 语篇统整和逻辑判断",
+  },
+  {
+    skill: "综合读写",
+    evidence: "检查续写情节链、人物情绪线和主题回扣。",
+    task: "用人物目标-冲突-转折-结尾四格图完成一次续写构思。",
+    examLink: "读后续写 · 情节合理性、连贯与真实表达",
+  },
+];
+
 export const interventionGroups = [
   {
     id: "vocab-context",

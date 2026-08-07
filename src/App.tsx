@@ -70,6 +70,9 @@ import {
   liveDemoCsv,
   liveQuestionGuide,
   knowledgeGraphNodes,
+  masteryMatrix,
+  masteryMatrixSkills,
+  masterySkillActions,
   optionMisconceptions,
   platformFeatureBenchmarks,
   repeatedErrorTracks,
@@ -161,6 +164,15 @@ type LiveDataSummary = {
   weakItems: LiveWeakItem[];
   causeCounts: Array<{ cause: string; count: number }>;
   students: LiveStudentRow[];
+  quality: {
+    coverage: number;
+    duplicateRows: number;
+    missingClassRows: number;
+    missingIdentityRows: number;
+    missingScoreCells: number;
+    totalScoreCells: number;
+    validScoreCells: number;
+  };
 };
 
 type DeepSeekStatus = "idle" | "ready" | "loading" | "success" | "error";
@@ -258,6 +270,23 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
 
   if (!scoreColumns.length) return null;
 
+  const totalScoreCells = records.length * scoreColumns.length;
+  const validScoreCells = records.reduce(
+    (sum, record) => sum + scoreColumns.filter((field) => parseScore(record[field]) !== null).length,
+    0,
+  );
+  const missingScoreCells = totalScoreCells - validScoreCells;
+  const identityValues = records.map((record) =>
+    (record["学生ID"] || record["学号"] || record["姓名"] || record["学生姓名"] || record["学生"] || "").trim(),
+  );
+  const identityCounts = identityValues.reduce<Map<string, number>>((counts, value) => {
+    if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+    return counts;
+  }, new Map());
+  const duplicateRows = [...identityCounts.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  const missingIdentityRows = identityValues.filter((value) => !value).length;
+  const missingClassRows = records.filter((record) => !(record["班级"] || record["年级"] || "").trim()).length;
+
   const maxByColumn = scoreColumns.reduce<Record<string, number>>((acc, field) => {
     const observedMax = Math.max(...records.map((record) => parseScore(record[field]) ?? 0));
     acc[field] = inferMaxScore(field, observedMax);
@@ -267,9 +296,11 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
 
   const students = records.map((record, index) => {
     const totalFromColumn = totalColumn ? parseScore(record[totalColumn]) : null;
-    const itemTotal = scoreColumns.reduce((sum, field) => sum + (parseScore(record[field]) ?? 0), 0);
+    const availableColumns = scoreColumns.filter((field) => parseScore(record[field]) !== null);
+    const itemTotal = availableColumns.reduce((sum, field) => sum + (parseScore(record[field]) ?? 0), 0);
+    const availableMax = availableColumns.reduce((sum, field) => sum + maxByColumn[field], 0);
     const total = totalFromColumn ?? itemTotal;
-    const weakItems = scoreColumns.filter((field) => {
+    const weakItems = availableColumns.filter((field) => {
       const score = parseScore(record[field]) ?? 0;
       return score < maxByColumn[field] * 0.65;
     });
@@ -279,7 +310,12 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
       displayName: maskStudentName(record["姓名"] || record["学生姓名"] || record["学生"] || "", index),
       className: record["班级"] || record["年级"] || "未分班",
       total,
-      rate: maxTotal > 0 ? total / maxTotal : 0,
+      rate:
+        totalFromColumn !== null && maxTotal > 0
+          ? totalFromColumn / maxTotal
+          : availableMax > 0
+            ? itemTotal / availableMax
+            : 0,
       weakItems,
       completedCorrection: /是|已|完成|1|true/i.test(correctionValue),
     };
@@ -288,9 +324,10 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
   const weakItems = scoreColumns
     .map((field) => {
       const guide = getQuestionGuide(field);
-      const totalScore = records.reduce((sum, record) => sum + (parseScore(record[field]) ?? 0), 0);
-      const averageRate = totalScore / (records.length * maxByColumn[field]);
-      const weakCount = records.filter((record) => (parseScore(record[field]) ?? 0) < maxByColumn[field] * 0.65).length;
+      const validRecords = records.filter((record) => parseScore(record[field]) !== null);
+      const totalScore = validRecords.reduce((sum, record) => sum + (parseScore(record[field]) ?? 0), 0);
+      const averageRate = validRecords.length ? totalScore / (validRecords.length * maxByColumn[field]) : 0;
+      const weakCount = validRecords.filter((record) => (parseScore(record[field]) ?? 0) < maxByColumn[field] * 0.65).length;
       return {
         field,
         label: guide?.label ?? field,
@@ -312,13 +349,14 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
   });
 
   const averageTotal = students.reduce((sum, student) => sum + student.total, 0) / students.length;
+  const averageRate = students.reduce((sum, student) => sum + student.rate, 0) / students.length;
   return {
     rowCount: students.length,
     classNames: [...new Set(students.map((student) => student.className))],
     scoreColumns,
     maxTotal,
     averageTotal,
-    averageRate: maxTotal > 0 ? averageTotal / maxTotal : 0,
+    averageRate,
     riskCount: students.filter((student) => student.rate < 0.6 || student.weakItems.length >= 3).length,
     completedCorrection: students.filter((student) => student.completedCorrection).length,
     weakItems: weakItems.slice(0, 5),
@@ -327,6 +365,15 @@ const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 4),
     students: students.slice(0, 8),
+    quality: {
+      coverage: totalScoreCells > 0 ? validScoreCells / totalScoreCells : 0,
+      duplicateRows,
+      missingClassRows,
+      missingIdentityRows,
+      missingScoreCells,
+      totalScoreCells,
+      validScoreCells,
+    },
   };
 };
 
@@ -924,6 +971,26 @@ function App() {
           </div>
         </header>
 
+        {activePanel !== "student" && (
+          <section className="analysis-context-bar" aria-label="当前分析范围">
+            <div className="analysis-context-main">
+              <FileText size={17} />
+              <span>当前周测</span>
+              <strong>{assignment.title}</strong>
+            </div>
+            <div className="analysis-context-meta">
+              <span>{selectedClass}</span>
+              <span>{assignment.date}</span>
+              <span className="context-source">{assignment.source}</span>
+              <b><CircleCheck size={14} /> 已完成分析</b>
+            </div>
+            <button onClick={() => setActivePanel("upload")} type="button">
+              <RefreshCw size={15} />
+              更新数据
+            </button>
+          </section>
+        )}
+
         {activePanel === "overview" && (
           <Overview
             classSnapshot={classSnapshot}
@@ -1384,6 +1451,20 @@ function UploadPanel({
   onPublish: () => void;
 }) {
   const liveInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const liveQuality = liveSummary?.quality ?? {
+    coverage: liveSummary ? 1 : 0,
+    duplicateRows: 0,
+    missingClassRows: 0,
+    missingIdentityRows: 0,
+    missingScoreCells: 0,
+    totalScoreCells: liveSummary ? liveSummary.rowCount * liveSummary.scoreColumns.length : 0,
+    validScoreCells: liveSummary ? liveSummary.rowCount * liveSummary.scoreColumns.length : 0,
+  };
+  const qualityNeedsReview = !!liveSummary && (
+    liveQuality.coverage < 0.95 ||
+    liveQuality.duplicateRows > 0 ||
+    liveQuality.missingIdentityRows > 0
+  );
 
   return (
     <div className="upload-layout">
@@ -1559,6 +1640,45 @@ function UploadPanel({
         </div>
         {liveSummary ? (
           <div className="live-analysis">
+            <section className="data-quality-gate" aria-label="数据质量检查">
+              <div className="data-quality-head">
+                <div>
+                  <FileCheck2 size={18} />
+                  <strong>数据质量门</strong>
+                  <span>先确认数据能不能信，再生成学情结论</span>
+                </div>
+                <b className={qualityNeedsReview ? "needs-review" : "ready"}>
+                  {qualityNeedsReview ? "建议老师确认" : "可直接分析"}
+                </b>
+              </div>
+              <div className="data-quality-grid">
+                <div>
+                  <span>得分识别覆盖率</span>
+                  <strong>{percent(liveQuality.coverage)}</strong>
+                  <small>{liveQuality.validScoreCells}/{liveQuality.totalScoreCells} 个得分单元</small>
+                </div>
+                <div>
+                  <span>缺失得分</span>
+                  <strong>{liveQuality.missingScoreCells}</strong>
+                  <small>缺失值不会自动按 0 分计算</small>
+                </div>
+                <div>
+                  <span>重复学生记录</span>
+                  <strong>{liveQuality.duplicateRows}</strong>
+                  <small>按学号 / 学生ID / 姓名检查</small>
+                </div>
+                <div>
+                  <span>待补基础字段</span>
+                  <strong>{liveQuality.missingIdentityRows + liveQuality.missingClassRows}</strong>
+                  <small>缺姓名 {liveQuality.missingIdentityRows} · 缺班级 {liveQuality.missingClassRows}</small>
+                </div>
+              </div>
+              <p>
+                {qualityNeedsReview
+                  ? "已保留可分析记录；建议先核对黄色提示项，避免把缺失数据误判为学生失分。"
+                  : "字段完整、记录无重复；当前数据已通过演示版检查，可进入薄弱题和学生跟进分析。"}
+              </p>
+            </section>
             <div className="live-metrics">
               <MetricCard
                 icon={Users}
@@ -1625,8 +1745,8 @@ function UploadPanel({
                 <span>总分</span>
                 <span>薄弱项</span>
               </div>
-              {liveSummary.students.map((student) => (
-                <div className="live-preview-row" key={student.id}>
+              {liveSummary.students.map((student, index) => (
+                <div className="live-preview-row" key={`${student.id}-${index}`}>
                   <strong>{student.displayName}</strong>
                   <span>{student.className}</span>
                   <span>{student.total.toFixed(1)}</span>
@@ -2123,6 +2243,35 @@ function AnalyticsPanel() {
     Object.fromEntries(warningCases.map((item) => [item.student, item.status])),
   );
   const [copiedAnalyticsText, setCopiedAnalyticsText] = useState("");
+  const [masteryFilter, setMasteryFilter] = useState<"all" | "attention" | "stable">("all");
+  const [selectedMasteryStudent, setSelectedMasteryStudent] = useState(masteryMatrix[0].student);
+  const [selectedMasterySkill, setSelectedMasterySkill] = useState<(typeof masteryMatrixSkills)[number]>("词汇语境");
+  const [assignedMasteryTask, setAssignedMasteryTask] = useState("");
+
+  const getMasteryRows = (filter: "all" | "attention" | "stable") => masteryMatrix.filter((row) => {
+    const values = Object.values(row.values);
+    if (filter === "attention") return values.some((score) => score < 60);
+    if (filter === "stable") return values.every((score) => score >= 65);
+    return true;
+  });
+  const filteredMasteryRows = getMasteryRows(masteryFilter);
+  const selectedMasteryRow = masteryMatrix.find((row) => row.student === selectedMasteryStudent) ?? masteryMatrix[0];
+  const selectedMasteryAction = masterySkillActions.find((item) => item.skill === selectedMasterySkill) ?? masterySkillActions[0];
+  const selectedMasteryScore = selectedMasteryRow.values[selectedMasterySkill];
+  const selectedMasteryKey = `${selectedMasteryStudent}-${selectedMasterySkill}`;
+
+  const handleMasteryFilter = (nextFilter: "all" | "attention" | "stable") => {
+    const nextRows = getMasteryRows(nextFilter);
+    setMasteryFilter(nextFilter);
+    if (!nextRows.some((row) => row.student === selectedMasteryStudent) && nextRows[0]) {
+      const weakestSkill = masteryMatrixSkills.reduce((weakest, skill) =>
+        nextRows[0].values[skill] < nextRows[0].values[weakest] ? skill : weakest,
+      masteryMatrixSkills[0]);
+      setSelectedMasteryStudent(nextRows[0].student);
+      setSelectedMasterySkill(weakestSkill);
+      setAssignedMasteryTask("");
+    }
+  };
 
   const cycleWarningStatus = (student: string) => {
     setWarningStatusMap((prev) => {
@@ -2216,6 +2365,105 @@ function AnalyticsPanel() {
               ))}
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="panel mastery-panel full">
+        <PanelHeader icon={Users} title="学生 × 能力掌握矩阵" action="从班级结论下钻到个人证据" />
+        <div className="mastery-toolbar">
+          <div className="mastery-segments" aria-label="掌握矩阵筛选">
+            {[
+              ["all", "全部学生"],
+              ["attention", "需关注"],
+              ["stable", "稳定达成"],
+            ].map(([id, label]) => (
+              <button
+                className={masteryFilter === id ? "active" : ""}
+                key={id}
+                onClick={() => handleMasteryFilter(id as "all" | "attention" | "stable")}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mastery-legend" aria-label="掌握度图例">
+            <span><i className="risk" />不足 60</span>
+            <span><i className="watch" />60-69</span>
+            <span><i className="good" />70 以上</span>
+          </div>
+        </div>
+        <div className="mastery-layout">
+          <div className="mastery-table-scroll">
+            <div className="mastery-table" role="table" aria-label="学生能力掌握度">
+              <div className="mastery-row mastery-head" role="row">
+                <span role="columnheader">学生 / 风险</span>
+                {masteryMatrixSkills.map((skill) => (
+                  <strong key={skill} role="columnheader">{skill}</strong>
+                ))}
+              </div>
+              {filteredMasteryRows.map((row) => (
+                <div className="mastery-row" key={row.student} role="row">
+                  <div className="mastery-student" role="rowheader">
+                    <strong>{row.student}</strong>
+                    <span>{row.risk} · {row.change}</span>
+                  </div>
+                  {masteryMatrixSkills.map((skill) => {
+                    const score = row.values[skill];
+                    const tone = score < 60 ? "risk" : score < 70 ? "watch" : "good";
+                    const selected = selectedMasteryStudent === row.student && selectedMasterySkill === skill;
+                    return (
+                      <button
+                        aria-label={`${row.student} ${skill} 掌握度 ${score}%`}
+                        aria-pressed={selected}
+                        className={`mastery-cell ${tone}${selected ? " selected" : ""}`}
+                        key={skill}
+                        onClick={() => {
+                          setSelectedMasteryStudent(row.student);
+                          setSelectedMasterySkill(skill);
+                          setAssignedMasteryTask("");
+                        }}
+                        type="button"
+                      >
+                        {score}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+          <aside className="mastery-inspector" aria-live="polite">
+            <span>当前定位</span>
+            <h3>{selectedMasteryRow.student} · {selectedMasterySkill}</h3>
+            <div className="mastery-score-line">
+              <strong>{selectedMasteryScore}%</strong>
+              <small>{selectedMasteryRow.risk} · 六周变化 {selectedMasteryRow.change}</small>
+            </div>
+            <p>{selectedMasteryRow.summary}</p>
+            <dl>
+              <div>
+                <dt>证据核对</dt>
+                <dd>{selectedMasteryAction.evidence}</dd>
+              </div>
+              <div>
+                <dt>建议任务</dt>
+                <dd>{selectedMasteryAction.task}</dd>
+              </div>
+              <div>
+                <dt>教考衔接</dt>
+                <dd>{selectedMasteryAction.examLink}</dd>
+              </div>
+            </dl>
+            <button
+              className="primary-button"
+              onClick={() => setAssignedMasteryTask(selectedMasteryKey)}
+              type="button"
+            >
+              <Send size={15} />
+              {assignedMasteryTask === selectedMasteryKey ? "已加入跟进清单" : "加入跟进清单"}
+            </button>
+          </aside>
         </div>
       </section>
 
