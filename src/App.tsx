@@ -87,6 +87,13 @@ import {
   writingRubricStandards,
 } from "./data/mockData";
 import type { ReportTone, WarningStatus } from "./data/mockData";
+import {
+  DEEPSEEK_API_URL,
+  normalizeDeepSeekModel,
+  normalizeTemporaryApiKey,
+  redactSensitiveText,
+  safeAggregateMetricLabel,
+} from "./security";
 import type { PracticeItem, QuestionItem, StudentAttempt } from "./types";
 
 type PanelId =
@@ -101,6 +108,8 @@ type PanelId =
   | "student";
 
 const assignment = assignments[0];
+const MAX_LIVE_DATA_CHARS = 2_000_000;
+const MAX_ESSAY_CHARS = 30_000;
 
 const teacherNav = [
   { id: "overview", label: "总览", icon: LayoutDashboard },
@@ -224,6 +233,9 @@ const getQuestionGuide = (field: string) => {
     return field === guide.field || field.includes(guide.field) || guide.field.includes(field) || (!!code && code === guideCode);
   });
 };
+
+const aggregateWeakItemLabel = (item: LiveWeakItem, index: number) =>
+  getQuestionGuide(item.field)?.label ?? safeAggregateMetricLabel(item.field, index);
 
 const inferMaxScore = (field: string, observedMax: number) => {
   const guide = getQuestionGuide(field);
@@ -401,7 +413,7 @@ const buildImaLearningSummary = ({
   const liveLines = liveSummary
     ? [
         `本地解析数据：${liveSummary.rowCount}名学生，${liveSummary.scoreColumns.length}个得分字段，平均达成率${percent(liveSummary.averageRate)}，需跟进${liveSummary.riskCount}人。`,
-        `薄弱题目：${liveSummary.weakItems.map((item) => `${item.label}(${item.cause}, 达成率${percent(item.averageRate)})`).join("；") || "暂无"}`,
+        `薄弱题目：${liveSummary.weakItems.map((item, index) => `${aggregateWeakItemLabel(item, index)}(${item.cause}, 达成率${percent(item.averageRate)})`).join("；") || "暂无"}`,
         `高频错因：${liveSummary.causeCounts.map((item) => `${item.cause}${item.count}次`).join("；") || "暂无"}`,
       ]
     : ["本地解析数据：暂未导入真实成绩表，请先在平台内解析后再复制摘要。"];
@@ -547,7 +559,7 @@ const buildDeepSeekPrompt = ({
   const liveSummaryLines = liveSummary
     ? [
         `真实数据本地解析：${liveSummary.rowCount}名学生，平均达成率${percent(liveSummary.averageRate)}，需跟进${liveSummary.riskCount}人。`,
-        `薄弱题：${liveSummary.weakItems.map((item) => `${item.label}(${item.type}, ${item.cause}, 达成率${percent(item.averageRate)})`).join("；")}`,
+        `薄弱题：${liveSummary.weakItems.map((item, index) => `${aggregateWeakItemLabel(item, index)}(${item.type}, ${item.cause}, 达成率${percent(item.averageRate)})`).join("；")}`,
         `高频错因：${liveSummary.causeCounts.map((item) => `${item.cause}${item.count}次`).join("；")}`,
       ]
     : ["暂未导入真实成绩表，请基于模拟班级概况输出。"];
@@ -608,7 +620,7 @@ function App() {
   const [liveMessage, setLiveMessage] = useState("已载入深圳高中英语样例数据，可直接替换为老师自己的表格。");
   const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
   const [deepSeekModel, setDeepSeekModel] = useState(() =>
-    typeof window === "undefined" ? "deepseek-v4-flash" : window.localStorage.getItem("deepseek_model") ?? "deepseek-v4-flash",
+    normalizeDeepSeekModel(typeof window === "undefined" ? "" : window.localStorage.getItem("deepseek_model")),
   );
   const [deepSeekState, setDeepSeekState] = useState<DeepSeekState>(() => ({
     status: "idle",
@@ -683,6 +695,11 @@ function App() {
   };
 
   const handleAnalyzeLiveCsv = (nextCsv = liveCsv) => {
+    if (nextCsv.length > MAX_LIVE_DATA_CHARS) {
+      setLiveSummary(null);
+      setLiveMessage("数据超过本地演示上限，请先拆分或只保留需要分析的字段和记录。");
+      return;
+    }
     const summary = analyzeLiveData(nextCsv);
     if (!summary) {
       setLiveSummary(null);
@@ -707,9 +724,13 @@ function App() {
   };
 
   const handleLiveDataFile = (file: File) => {
+    if (file.size > MAX_LIVE_DATA_CHARS * 4) {
+      setLiveMessage("文件过大，未读取。请先拆分后再导入。");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
-      const text = String(reader.result ?? "");
+      const text = String(reader.result ?? "").slice(0, MAX_LIVE_DATA_CHARS);
       setLiveCsv(text);
       handleAnalyzeLiveCsv(text);
     };
@@ -717,7 +738,8 @@ function App() {
   };
 
   const requestDeepSeek = async (mode: "test" | "teaching" | "practice" | "report") => {
-    const key = deepSeekApiKey.trim();
+    const suppliedKey = deepSeekApiKey.trim();
+    const key = normalizeTemporaryApiKey(suppliedKey);
     const prompt = mode === "test"
       ? "请用一句中文回复：DeepSeek API 连接正常。"
       : buildDeepSeekPrompt({
@@ -727,6 +749,15 @@ function App() {
           question: selectedQuestion,
           mode,
         });
+
+    if (suppliedKey && !key) {
+      setDeepSeekState({
+        status: "error",
+        message: "API Key 格式异常，未发送任何请求。请重新粘贴临时 Key。",
+        result: deepSeekFallbackText,
+      });
+      return;
+    }
 
     if (!key) {
       setDeepSeekState({
@@ -744,14 +775,18 @@ function App() {
     });
 
     try {
-      const response = await fetch("https://api.deepseek.com/chat/completions", {
+      const response = await fetch(DEEPSEEK_API_URL, {
         method: "POST",
+        cache: "no-store",
+        credentials: "omit",
+        mode: "cors",
+        referrerPolicy: "no-referrer",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify({
-          model: deepSeekModel,
+          model: normalizeDeepSeekModel(deepSeekModel),
           messages: [
             {
               role: "system",
@@ -766,8 +801,7 @@ function App() {
       });
 
       if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`DeepSeek API 返回 ${response.status}：${detail.slice(0, 160)}`);
+        throw new Error(`DeepSeek API 请求失败（HTTP ${response.status}）`);
       }
 
       const payload = await response.json();
@@ -790,7 +824,8 @@ function App() {
   };
 
   const requestEssayCorrection = async () => {
-    const key = deepSeekApiKey.trim();
+    const suppliedKey = deepSeekApiKey.trim();
+    const key = normalizeTemporaryApiKey(suppliedKey);
     const cleanEssay = essayText.trim();
 
     if (cleanEssay.length < 60) {
@@ -798,6 +833,24 @@ function App() {
         status: "error",
         message: "请先粘贴一篇较完整的作文/续写文本，再进行批改。",
         result: "至少建议输入 60 个以上字符；正式试用时可以直接复制学生作文原文到这里。",
+      });
+      return;
+    }
+
+    if (cleanEssay.length > MAX_ESSAY_CHARS) {
+      setEssayCorrectionState({
+        status: "error",
+        message: "文本过长，未发送任何请求。请缩短后重试。",
+        result: essayCorrectionFallbackText,
+      });
+      return;
+    }
+
+    if (suppliedKey && !key) {
+      setEssayCorrectionState({
+        status: "error",
+        message: "API Key 格式异常，未发送任何请求。请重新粘贴临时 Key。",
+        result: essayCorrectionFallbackText,
       });
       return;
     }
@@ -817,15 +870,21 @@ function App() {
       result: essayCorrectionState.result,
     });
 
+    const privacySafeEssay = redactSensitiveText(cleanEssay);
+
     try {
-      const response = await fetch("https://api.deepseek.com/chat/completions", {
+      const response = await fetch(DEEPSEEK_API_URL, {
         method: "POST",
+        cache: "no-store",
+        credentials: "omit",
+        mode: "cors",
+        referrerPolicy: "no-referrer",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify({
-          model: deepSeekModel,
+          model: normalizeDeepSeekModel(deepSeekModel),
           messages: [
             {
               role: "system",
@@ -835,7 +894,7 @@ function App() {
               role: "user",
               content: buildEssayCorrectionPrompt({
                 className: selectedClass,
-                essayText: cleanEssay,
+                essayText: privacySafeEssay.text,
               }),
             },
           ],
@@ -846,8 +905,7 @@ function App() {
       });
 
       if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`DeepSeek API 返回 ${response.status}：${detail.slice(0, 160)}`);
+        throw new Error(`DeepSeek API 请求失败（HTTP ${response.status}）`);
       }
 
       const payload = await response.json();
@@ -856,7 +914,9 @@ function App() {
 
       setEssayCorrectionState({
         status: "success",
-        message: "DeepSeek 已完成作文批改，可复制给老师讨论。",
+        message: privacySafeEssay.redactionCount
+          ? `DeepSeek 已完成作文批改；发送前自动移除了 ${privacySafeEssay.redactionCount} 处显式个人标识。`
+          : "DeepSeek 已完成作文批改，可复制给老师讨论。",
         result: content,
       });
     } catch (error) {
@@ -1621,7 +1681,8 @@ function UploadPanel({
         </div>
         <textarea
           className="live-data-input"
-          onChange={(event) => setLiveCsv(event.target.value)}
+          maxLength={MAX_LIVE_DATA_CHARS}
+          onChange={(event) => setLiveCsv(event.target.value.slice(0, MAX_LIVE_DATA_CHARS))}
           placeholder="从 Excel 复制表头和学生成绩后粘贴到这里，或上传 CSV 文件。"
           ref={liveInputRef}
           value={liveCsv}
@@ -1786,11 +1847,17 @@ function ResultsPanel({
   const handleEssayFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_ESSAY_CHARS * 4) {
+      setEssayFileName("文件过大，未读取");
+      setEssayText("");
+      event.target.value = "";
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
       setEssayFileName(file.name);
-      setEssayText(String(reader.result ?? ""));
+      setEssayText(String(reader.result ?? "").slice(0, MAX_ESSAY_CHARS));
     };
     reader.readAsText(file, "utf-8");
     event.target.value = "";
@@ -1851,9 +1918,11 @@ function ResultsPanel({
             <label className="essay-key-row">
               <span>DeepSeek Key</span>
               <input
-                autoComplete="off"
+                autoComplete="new-password"
+                maxLength={512}
                 onChange={(event) => setDeepSeekApiKey(event.target.value)}
                 placeholder="可选：粘贴 Key 后批改真实文本"
+                spellCheck={false}
                 type="password"
                 value={deepSeekApiKey}
               />
@@ -1861,7 +1930,8 @@ function ResultsPanel({
             </label>
             <textarea
               className="essay-live-input"
-              onChange={(event) => setEssayText(event.target.value)}
+              maxLength={MAX_ESSAY_CHARS}
+              onChange={(event) => setEssayText(event.target.value.slice(0, MAX_ESSAY_CHARS))}
               placeholder="把学生作文、读后续写或应用文原文粘贴到这里。演示版支持 txt/csv 文本上传；Word/PDF 可在正式版接入解析服务。"
               value={essayText}
             />
@@ -1893,7 +1963,7 @@ function ResultsPanel({
               </button>
             </div>
             <p className="essay-live-note">
-              点击批改才会把文本发送给 DeepSeek；给真实学生试用时建议先去姓名、学号等个人信息。无 API Key 时会展示本地样例结果，保证演示不断。
+              点击批改才会把文本发送给 DeepSeek；发送前会在本地移除显式邮箱、电话、身份证号、姓名和学号字段。仍请先人工检查其他可识别信息。无 API Key 时会展示本地样例结果。
             </p>
           </div>
           <div className={`deepseek-output essay-correction-output ${essayCorrectionState.status}`}>
@@ -2879,7 +2949,7 @@ function ImaAssistantPanel({
         <div className="ima-privacy-card">
           <ShieldCheck size={22} />
           <strong>API边界</strong>
-          <p>DeepSeek Key 只保存在当前浏览器；点击生成时才会把匿名学情摘要发送到 DeepSeek。未填 Key 时自动使用本地演示结果。</p>
+          <p>DeepSeek Key 只保存在当前页面内存；点击生成时才会把匿名学情摘要发送到 DeepSeek。未填 Key 时自动使用本地演示结果。</p>
         </div>
       </section>
 
@@ -2890,9 +2960,11 @@ function ImaAssistantPanel({
             <label>
               <span>API Key</span>
               <input
-                autoComplete="off"
+                autoComplete="new-password"
+                maxLength={512}
                 onChange={(event) => setDeepSeekApiKey(event.target.value)}
                 placeholder="sk-... 仅在当前页面临时使用"
+                spellCheck={false}
                 type="password"
                 value={deepSeekApiKey}
               />
@@ -2943,7 +3015,7 @@ function ImaAssistantPanel({
               </button>
             </div>
             <p className="deepseek-note">
-              浏览器直连适合 demo；正式产品建议改成学校服务器代理，并加入权限、审计和脱敏策略。
+              浏览器直连只适合 demo，请使用单独的低额度临时 Key；正式产品应改为学校服务器代理，并加入权限、审计和脱敏策略。
             </p>
           </div>
           <div className={`deepseek-output ${deepSeekState.status}`}>
