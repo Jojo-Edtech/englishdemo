@@ -606,17 +606,13 @@ function App() {
     analyzeLiveData(liveDemoCsv),
   );
   const [liveMessage, setLiveMessage] = useState("已载入深圳高中英语样例数据，可直接替换为老师自己的表格。");
-  const [deepSeekApiKey, setDeepSeekApiKey] = useState(() =>
-    typeof window === "undefined" ? "" : window.localStorage.getItem("deepseek_api_key") ?? "",
-  );
+  const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
   const [deepSeekModel, setDeepSeekModel] = useState(() =>
     typeof window === "undefined" ? "deepseek-v4-flash" : window.localStorage.getItem("deepseek_model") ?? "deepseek-v4-flash",
   );
   const [deepSeekState, setDeepSeekState] = useState<DeepSeekState>(() => ({
-    status: typeof window !== "undefined" && window.localStorage.getItem("deepseek_api_key") ? "ready" : "idle",
-    message: typeof window !== "undefined" && window.localStorage.getItem("deepseek_api_key")
-      ? "已检测到本机浏览器保存的 DeepSeek Key，可测试连接。"
-      : "未填写 API Key 时使用本地演示结果。",
+    status: "idle",
+    message: "API Key 仅保留在当前页面内存中，刷新或关闭页面后自动清除。",
     result: "",
   }));
   const [essayText, setEssayText] = useState(demoEssayText);
@@ -629,12 +625,8 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (deepSeekApiKey.trim()) {
-      window.localStorage.setItem("deepseek_api_key", deepSeekApiKey.trim());
-    } else {
-      window.localStorage.removeItem("deepseek_api_key");
-    }
-  }, [deepSeekApiKey]);
+    window.localStorage.removeItem("deepseek_api_key");
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1865,7 +1857,7 @@ function ResultsPanel({
                 type="password"
                 value={deepSeekApiKey}
               />
-              <small>{deepSeekApiKey ? "已保存在本机浏览器，本页可直接批改。" : "不填 Key 会显示本地样例批改结果。"}</small>
+              <small>{deepSeekApiKey ? "Key 仅在当前页面临时使用，刷新后自动清除。" : "不填 Key 会显示本地样例批改结果。"}</small>
             </label>
             <textarea
               className="essay-live-input"
@@ -2900,7 +2892,7 @@ function ImaAssistantPanel({
               <input
                 autoComplete="off"
                 onChange={(event) => setDeepSeekApiKey(event.target.value)}
-                placeholder="sk-... 只保存在本机浏览器"
+                placeholder="sk-... 仅在当前页面临时使用"
                 type="password"
                 value={deepSeekApiKey}
               />
