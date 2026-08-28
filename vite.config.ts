@@ -10,9 +10,9 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          charts: ["recharts"],
-          icons: ["lucide-react"],
+        manualChunks(id) {
+          if (id.includes("/node_modules/recharts/")) return "charts";
+          if (id.includes("/node_modules/lucide-react/")) return "icons";
         },
       },
     },
