@@ -12,16 +12,17 @@
     "test:visual": "node scripts/visual-ui-audit.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^6.0.3",
     "lucide-react": "^0.468.0",
     "recharts": "^3.5.0",
-    "vite": "^7.2.7",
+    "vite": "^8.2.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "playwright": "^1.62.1",
     "typescript": "^5.9.3"
   }
 }
