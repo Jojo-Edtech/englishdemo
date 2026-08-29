@@ -3947,7 +3947,7 @@ h1 {
     height: 66px;
     padding: 6px 8px 8px;
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 4px;
     border-top: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.96);
@@ -5562,6 +5562,7 @@ h1 {
   border: none;
   background: transparent;
   padding: 4px 10px;
+  min-height: 32px;
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 600;
@@ -5592,6 +5593,7 @@ h1 {
   background: #fff;
   border-radius: 999px;
   padding: 4px 12px;
+  min-height: 32px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;

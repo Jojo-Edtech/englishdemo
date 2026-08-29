@@ -131,9 +131,27 @@ async function layoutCheck(page, scope) {
       }
       const text = (element.textContent || "").replace(/\s+/g, " ").trim();
       const className = String(element.className || "");
+      const insideHorizontalScroller = (() => {
+        let ancestor = element.parentElement;
+        while (ancestor && ancestor !== document.body) {
+          const ancestorStyle = getComputedStyle(ancestor);
+          if (
+            ["auto", "scroll"].includes(ancestorStyle.overflowX) &&
+            ancestor.scrollWidth > ancestor.clientWidth + 2
+          ) {
+            return true;
+          }
+          ancestor = ancestor.parentElement;
+        }
+        return false;
+      })();
 
       if (rect.left < -4 || rect.right > viewportWidth + 4) {
-        if (!element.closest(".heatmap") && !element.closest(".recharts-wrapper")) {
+        if (
+          !insideHorizontalScroller &&
+          !element.closest(".heatmap") &&
+          !element.closest(".recharts-wrapper")
+        ) {
           outside.push({
             tag,
             className: className.slice(0, 90),
