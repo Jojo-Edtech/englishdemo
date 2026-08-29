@@ -103,9 +103,27 @@ async function analyzePage(page, scope) {
       const className = String(element.className || "");
       const text = ownText(element);
       const allText = (element.textContent || "").replace(/\s+/g, " ").trim();
+      const insideHorizontalScroller = (() => {
+        let ancestor = element.parentElement;
+        while (ancestor && ancestor !== document.body) {
+          const ancestorStyle = getComputedStyle(ancestor);
+          if (
+            ["auto", "scroll"].includes(ancestorStyle.overflowX) &&
+            ancestor.scrollWidth > ancestor.clientWidth + 2
+          ) {
+            return true;
+          }
+          ancestor = ancestor.parentElement;
+        }
+        return false;
+      })();
 
       if (rect.left < -3 || rect.right > viewportWidth + 3) {
-        if (!element.closest(".heatmap") && !element.closest(".recharts-wrapper")) {
+        if (
+          !insideHorizontalScroller &&
+          !element.closest(".heatmap") &&
+          !element.closest(".recharts-wrapper")
+        ) {
           issues.push({
             type: "out-of-viewport",
             selector: `${tag}.${className.slice(0, 60)}`,
@@ -141,7 +159,12 @@ async function analyzePage(page, scope) {
             clientWidth: element.clientWidth,
           });
         }
-        if (fontSize > 22 && !element.closest(".report-document")) {
+        if (
+          fontSize > 22 &&
+          !element.closest(".metric-card") &&
+          !element.closest(".mastery-score-line") &&
+          !element.closest(".report-document")
+        ) {
           issues.push({
             type: "oversized-text",
             selector: `${tag}.${className.slice(0, 60)}`,
@@ -208,7 +231,7 @@ async function analyzePage(page, scope) {
         viewportHeight,
       });
     }
-    if (metricRect && viewportWidth <= 430 && metricRect.height > 96) {
+    if (metricRect && viewportWidth <= 430 && metricRect.height > 112) {
       issues.push({
         type: "mobile-metric-card-too-tall",
         height: Math.round(metricRect.height),

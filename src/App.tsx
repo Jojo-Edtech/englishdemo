@@ -128,6 +128,7 @@ const mobileNav = [
   { id: "diagnosis", label: "错因", icon: SearchCheck },
   { id: "analytics", label: "学情", icon: BarChart3 },
   { id: "reports", label: "报告", icon: FileText },
+  { id: "ima", label: "ima", icon: Brain },
   { id: "student", label: "学生", icon: UserRound },
 ] satisfies Array<{ id: PanelId; label: string; icon: typeof LayoutDashboard }>;
 
