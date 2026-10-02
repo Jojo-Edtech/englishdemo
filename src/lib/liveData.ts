@@ -28,7 +28,7 @@ export interface LiveDataSummary {
 }
 
 export function findQuestionGuide(field: string, guides: QuestionGuide[]) {
-  const code = field.match(/Q\d+|听说/i)?.[0].toUpperCase();
+  const code = /listening\s*(?:&|and)\s*speaking/i.test(field) ? "听说" : field.match(/Q\d+|听说/i)?.[0].toUpperCase();
   return guides.find((guide) => guide.field === field ||
     (!!code && guide.field.match(/Q\d+|听说/i)?.[0].toUpperCase() === code));
 }
@@ -64,7 +64,7 @@ export function analyzeLiveData(rawText: string, guides: QuestionGuide[]): LiveD
   if (!scoreColumns.length) return null;
 
   const maxima = new Map(scoreColumns.map((field) => {
-    const declaredMax = field.match(/满分\s*(\d+(?:\.\d+)?)/)?.[1];
+    const declaredMax = field.match(/(?:满分|max(?:imum)?\s*[:=]?)\s*(\d+(?:\.\d+)?)/i)?.[1];
     const max = declaredMax ? Number(declaredMax) : findQuestionGuide(field, guides)?.max;
     return [field, max && max > 0 ? max : null];
   }));

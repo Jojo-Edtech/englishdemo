@@ -14,8 +14,18 @@
 - **报告模板**：备课组 / 学生 / 家长三版报告，支持**语气切换（正式/简洁/鼓励）**、正文编辑、复制、下载 Markdown、打印存 PDF；家长模板默认隐藏排名，修改后须教师复核
 - **讲评课备课单**：可复制、可导出教案大纲
 - **学生端**：个人画像、进度曲线、任务流程示例、**本地规则生成跟进草稿**、**个人错题本导出打印**；任务按学生隔离，缺少历史档案时显示空状态
+- **中英文切换**：首次访问默认中文，顶部可选择 English；界面、图表、诊断、练习、报告与导出使用本地英文文案，记住语言偏好，不调用翻译 API
 
 真实导入只驱动本地试用台及相关匿名摘要；其余页面包含标明来源的预设演示数据。教师/学生切换不是权限系统，家长和校长属于报告使用场景，尚无独立账号。当前会话的草稿和跟进状态刷新后重置，不写入云端数据库。
+
+## 中英文内容
+
+- 上传的题目、作文、姓名、班级和教师修改稿保留原文，不自动翻译；中英文报告草稿分别暂存在本次页面会话中。
+- 英文模式可下载、载入英文成绩样例；支持 `id`、`name`、`class`、题号及 `max10` 等满分标记。中英文样例的分数与分析结果一致。
+- DeepSeek 原有功能仍为可选。语言切换不发送任何请求；手动发起 AI 请求时会要求用当前界面语言回答，已生成的真实 AI 反馈保留原文。
+- 文案维护在 `src/i18n/`。只翻译显示值，不改动题型枚举、学生 ID、图表 dataKey 或原始数据。动态文案使用 `t("模板 {0}", [value])`，保留完整语序。
+
+English Learning Analytics supports teacher workflows from importing assessment results to reviewing errors, planning targeted practice and sharing student or family reports. Select **English** in the header. Sample data and optional AI features remain clearly distinguished from teacher-entered records.
 
 ## 本地开发
 
@@ -26,6 +36,7 @@ npm run build    # 产物在 dist/
 npm run test:live-data
 npm run test:security
 npm run test:essay-rubric
+npm run test:i18n
 ```
 
 推送到 `main` 分支后，GitHub Actions 自动构建并部署到 GitHub Pages。

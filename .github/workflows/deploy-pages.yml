@@ -41,6 +41,9 @@ jobs:
       - name: Test writing rubric fixtures
         run: npm run test:essay-rubric
 
+      - name: Test bilingual content and score parity
+        run: npm run test:i18n
+
       - name: Build
         run: npm run build
 

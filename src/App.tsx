@@ -1,3 +1,6 @@
+import { useLocale } from "./i18n/LocaleContext";
+import { sampleCsvForLocale, sampleEssaysForLocale } from "./i18n/sampleData";
+import { chartLabel, type Locale } from "./i18n/translate";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -19,6 +22,7 @@ import {
   Menu,
   X,
   LayoutDashboard,
+  Languages,
   LineChart,
   MessageSquareText,
   Play,
@@ -56,14 +60,12 @@ import {
   causeStack,
   classSnapshots,
   essayWorkbench,
-  essayStressCsv,
   essayStressSamples,
   essayStressSummary,
   fieldMappingRows,
   heatmap,
   heatmapColumns,
   importSources,
-  liveDemoCsv,
   liveQuestionGuide,
   knowledgeGraphNodes,
   masteryMatrix,
@@ -157,8 +159,10 @@ const downloadTextFile = (content: string, filename: string, mime = "text/csv;ch
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 const buildImaLearningSummary = ({
@@ -311,12 +315,14 @@ const buildDeepSeekPrompt = ({
   liveSummary,
   question,
   mode,
+  locale,
 }: {
   className: string;
   classSnapshot: (typeof classSnapshots)[number];
   liveSummary: LiveDataSummary | null;
   question: QuestionItem;
   mode: "teaching" | "practice" | "report";
+  locale: Locale;
 }) => {
   const liveSummaryLines = liveSummary
     ? [
@@ -340,7 +346,9 @@ const buildDeepSeekPrompt = ({
     task,
     "",
     "【输出格式】",
-    "用中文，分为：核心判断、课堂动作、分层练习、跟踪证据。每点尽量短，适合老师直接复制到备课记录。",
+    locale === "en"
+      ? "Respond in natural English under these headings: Key finding, Classroom action, Differentiated practice, Follow-up evidence. Keep each point concise and useful for a teacher's lesson plan."
+      : "用中文，分为：核心判断、课堂动作、分层练习、跟踪证据。每点尽量短，适合老师直接复制到备课记录。",
     "",
     "【班级概况】",
     `范围：${className}`,
@@ -364,6 +372,7 @@ const buildDeepSeekPrompt = ({
 };
 
 function App() {
+  const { t, locale, setLocale } = useLocale();
   const [activePanel, setActivePanel] = useState<PanelId>(readPanelFromUrl);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDialogElement>(null);
@@ -410,15 +419,15 @@ function App() {
   const [selectedQuestionId, setSelectedQuestionId] = useState("q1");
   const [selectedStudentId, setSelectedStudentId] = useState("s2");
   const [questionText, setQuestionText] = useState(sampleQuestionText);
-  const [fileName, setFileName] = useState("高二阅读与续写周测06.pdf");
+  const [fileName, setFileName] = useState("grade-11-weekly-test-06.pdf");
   const [analysisReady, setAnalysisReady] = useState(true);
   const [generated, setGenerated] = useState<{ questionId: string; items: PracticeItem[] } | null>(null);
   const [selectedReportId, setSelectedReportId] = useState(reportTemplates[0].id);
   const [copiedReport, setCopiedReport] = useState("");
   const [copiedImaText, setCopiedImaText] = useState("");
-  const [liveCsv, setLiveCsv] = useState(liveDemoCsv);
+  const [liveCsv, setLiveCsv] = useState(() => sampleCsvForLocale(locale));
   const [liveSummary, setLiveSummary] = useState<LiveDataSummary | null>(() =>
-    analyzeLiveData(liveDemoCsv),
+    analyzeLiveData(sampleCsvForLocale(locale)),
   );
   const [liveMessage, setLiveMessage] = useState("已载入深圳高中英语样例数据，可直接替换为老师自己的表格。");
   const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
@@ -431,7 +440,7 @@ function App() {
     result: "",
   }));
   const [essayText, setEssayText] = useState(demoEssayText);
-  const [essayFileName, setEssayFileName] = useState("样例续写作文.txt");
+  const [essayFileName, setEssayFileName] = useState("sample-story-continuation.txt");
   const [essayCorrectionState, setEssayCorrectionState] = useState<DeepSeekState>({
     status: "idle",
     message: "可粘贴作文或上传 txt/csv 文本；点击批改后生成反馈。",
@@ -512,8 +521,9 @@ function App() {
   };
 
   const handleLoadLiveSample = () => {
-    setLiveCsv(liveDemoCsv);
-    const summary = analyzeLiveData(liveDemoCsv);
+    const sample = sampleCsvForLocale(locale);
+    setLiveCsv(sample);
+    const summary = analyzeLiveData(sample);
     setLiveSummary(summary);
     setLiveMessage("已重新载入样例数据。明天展示时可以先点这里，再换老师自己的表格。");
   };
@@ -548,13 +558,14 @@ function App() {
     const suppliedKey = deepSeekApiKey.trim();
     const key = normalizeTemporaryApiKey(suppliedKey);
     const prompt = mode === "test"
-      ? "请用一句中文回复：DeepSeek API 连接正常。"
+      ? (locale === "en" ? "Reply with one sentence: DeepSeek connection successful." : "请用一句中文回复：DeepSeek API 连接正常。")
       : buildDeepSeekPrompt({
           className: selectedClass,
           classSnapshot,
           liveSummary,
           question: selectedQuestion,
           mode,
+          locale,
         });
 
     if (suppliedKey && !key) {
@@ -597,7 +608,7 @@ function App() {
           messages: [
             {
               role: "system",
-              content: "你是高中英语教研助手，回答要短、清楚、可落地，避免编造学生个人隐私。",
+              content: locale === "en" ? "You support upper-secondary English teachers. Respond in natural English with concise, practical suggestions. Do not invent personal information about students." : "你是高中英语教研助手，回答要短、清楚、可落地，避免编造学生个人隐私。",
             },
             { role: "user", content: prompt },
           ],
@@ -695,7 +706,7 @@ function App() {
           messages: [
             {
               role: "system",
-              content: "你是高中英语作文批改与教研助手，输出要具体、克制、可落地，不编造学生隐私。",
+              content: locale === "en" ? "You review upper-secondary English writing. Respond in natural English with specific, measured and practical feedback. Preserve quoted student text. Do not invent personal information about students." : "你是高中英语作文批改与教研助手，输出要具体、克制、可落地，不编造学生隐私。",
             },
             {
               role: "user",
@@ -750,56 +761,61 @@ function App() {
 
   return (
     <div className={`app-shell workspace ${activePanel === "overview" ? "is-overview" : ""}`}>
-      <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); document.getElementById("main-content")?.scrollIntoView(); }}>跳到主要内容</a>
+      <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); document.getElementById("main-content")?.scrollIntoView(); }}>{t("跳到主要内容")}</a>
       <header className="workspace-header">
-        <button className="workspace-brand" onClick={() => setActivePanel("overview")} type="button" aria-label="英语备课组学情分析平台首页">
-          <strong>英语备课组</strong>
-          <span>学情分析平台</span>
+        <button className="workspace-brand" onClick={() => setActivePanel("overview")} type="button" aria-label={t("英语备课组学情分析平台首页")}>
+          <strong>{t("英语备课组")}</strong>
+          <span>{t("学情分析平台")}</span>
         </button>
 
-        <nav className="nav-list" aria-label="教师端导航">
+        <nav className="nav-list" aria-label={t("教师端导航")}>
           {teacherNav.map((item) => (
             <button
               className={activePanel === item.id ? "nav-item active" : "nav-item"}
               key={item.id}
               onClick={() => setActivePanel(item.id)}
               type="button"
-              title={item.label}
+              title={t(item.label)}
               aria-current={activePanel === item.id ? "page" : undefined}
             >
               <item.icon size={16} aria-hidden="true" />
-              <span>{item.label}</span>
+              <span>{t(item.label)}</span>
             </button>
           ))}
         </nav>
 
-        <div className="mode-switch" role="group" aria-label="切换角色视图">
-          <button className={activePanel !== "student" ? "selected" : ""} aria-pressed={activePanel !== "student"} onClick={() => setActivePanel("overview")} type="button">教师</button>
-          <button className={activePanel === "student" ? "selected" : ""} aria-pressed={activePanel === "student"} onClick={() => setActivePanel("student")} type="button">学生</button>
+        <label className="language-select">
+          <Languages size={16} aria-hidden="true" />
+          <select aria-label="语言 / Language" value={locale} onChange={(event) => setLocale(event.target.value === "en" ? "en" : "zh-CN")}>
+            <option value="zh-CN" lang="zh-CN">中文</option>
+            <option value="en" lang="en">English</option>
+          </select>
+        </label>
+        <div className="mode-switch" role="group" aria-label={t("切换角色视图")}>
+          <button className={activePanel !== "student" ? "selected" : ""} aria-pressed={activePanel !== "student"} onClick={() => setActivePanel("overview")} type="button">{t("教师")}</button>
+          <button className={activePanel === "student" ? "selected" : ""} aria-pressed={activePanel === "student"} onClick={() => setActivePanel("student")} type="button">{t("学生")}</button>
         </div>
       </header>
 
       <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div>
-            <p className="eyebrow">{activePanel === "student" ? "我的学习" : "教师工作台"} <span>· 演示数据</span></p>
-            <h1>{activePanel === "overview" ? "英语备课组学情分析平台" : panelTitle}</h1>
+            <p className="eyebrow">{t(activePanel === "student" ? "我的学习" : "教师工作台")} <span>{t("· 演示数据")}</span></p>
+            <h1>{t(activePanel === "overview" ? "英语备课组学情分析平台" : panelTitle)}</h1>
           </div>
           <div className="top-actions">
             <span className="data-badge">
-              <ShieldCheck size={16} />
-              本地解析 · 不上传
-            </span>
+              <ShieldCheck size={16} />{t("本地解析 · 不上传")}</span>
             {["overview", "diagnosis", "ima"].includes(activePanel) && <label className="select-wrap">
               <Filter size={16} />
               <select
-                aria-label="选择班级"
+                aria-label={t("选择班级")}
                 value={selectedClass}
                 onChange={(event) => setSelectedClass(event.target.value)}
               >
                 {classSnapshots.map((snapshot) => (
                   <option key={snapshot.className} value={snapshot.className}>
-                    {snapshot.className}
+                    {t(snapshot.className)}
                   </option>
                 ))}
               </select>
@@ -808,22 +824,20 @@ function App() {
         </header>
 
         {activePanel !== "student" && (
-          <section className="analysis-context-bar" aria-label="当前分析范围">
+          <section className="analysis-context-bar" aria-label={t("当前分析范围")}>
             <div className="analysis-context-main">
               <FileText size={17} />
-              <span>演示周测</span>
-              <strong>{assignment.title}</strong>
+              <span>{t("演示周测")}</span>
+              <strong>{t(assignment.title)}</strong>
             </div>
             <div className="analysis-context-meta">
-              <span>{["overview", "diagnosis", "ima"].includes(activePanel) ? selectedClass : activePanel === "analytics" ? "跨班级能力样例" : activePanel === "reports" ? "报告模板演示" : "测评样例"}</span>
-              <span>{assignment.date}</span>
-              <span className="context-source">{assignment.source}</span>
-              <b><CircleCheck size={14} /> 演示样例</b>
+              <span>{t(["overview", "diagnosis", "ima"].includes(activePanel) ? selectedClass : activePanel === "analytics" ? "跨班级能力样例" : activePanel === "reports" ? "报告模板演示" : "测评样例")}</span>
+              <span>{t(assignment.date)}</span>
+              <span className="context-source">{t(assignment.source)}</span>
+              <b><CircleCheck size={14} />{t(" 演示样例")}</b>
             </div>
             <button onClick={() => setActivePanel("upload")} type="button">
-              <RefreshCw size={15} />
-              更新数据
-            </button>
+              <RefreshCw size={15} />{t("更新数据")}</button>
           </section>
         )}
 
@@ -860,7 +874,7 @@ function App() {
             questionText={questionText}
             onAnalyzeLiveCsv={handleAnalyzeLiveCsv}
             onClearLiveData={handleClearLiveData}
-            onDownloadLiveSample={() => downloadTextFile(liveDemoCsv, "shenzhen-english-demo-sample.csv")}
+            onDownloadLiveSample={() => downloadTextFile(sampleCsvForLocale(locale), `shenzhen-english-demo-sample-${locale}.csv`)}
             onLiveDataFile={handleLiveDataFile}
             onLoadLiveSample={handleLoadLiveSample}
             setAnalysisReady={setAnalysisReady}
@@ -957,30 +971,30 @@ function App() {
         )}
       </main>
 
-      <footer className="workspace-footer"><span>英语备课组学情分析平台</span><span>演示数据 · 不关联任何学校</span></footer>
+      <footer className="workspace-footer"><span>{t("英语备课组学情分析平台")}</span><span>{t("演示数据 · 不关联任何学校")}</span></footer>
       <dialog className="workspace-menu" ref={mobileMenuRef} aria-labelledby="workspace-menu-title" onCancel={() => setMobileMenuOpen(false)} onClose={() => setMobileMenuOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
-        <div className="workspace-menu-head"><h2 id="workspace-menu-title">全部功能</h2><button type="button" className="icon-button" aria-label="关闭全部功能" onClick={() => setMobileMenuOpen(false)}><X size={20} /></button></div>
-        <nav aria-label="全部功能导航">
+        <div className="workspace-menu-head"><h2 id="workspace-menu-title">{t("全部功能")}</h2><button type="button" className="icon-button" aria-label={t("关闭全部功能")} onClick={() => setMobileMenuOpen(false)}><X size={20} /></button></div>
+        <nav aria-label={t("全部功能导航")}>
           {[...teacherNav, { id: "student" as const, label: "学生", icon: UserRound }].map((item) => (
-            <button type="button" key={item.id} className={activePanel === item.id ? "active" : ""} aria-current={activePanel === item.id ? "page" : undefined} onClick={() => { setActivePanel(item.id); setMobileMenuOpen(false); }}><item.icon size={20} aria-hidden="true" /><span>{item.label}</span><ChevronRight size={16} aria-hidden="true" /></button>
+            <button type="button" key={item.id} className={activePanel === item.id ? "active" : ""} aria-current={activePanel === item.id ? "page" : undefined} onClick={() => { setActivePanel(item.id); setMobileMenuOpen(false); }}><item.icon size={20} aria-hidden="true" /><span>{t(item.label)}</span><ChevronRight size={16} aria-hidden="true" /></button>
           ))}
         </nav>
       </dialog>
-      <nav className="mobile-nav" aria-label="移动端导航">
+      <nav className="mobile-nav" aria-label={t("移动端导航")}>
         {mobileNav.map((item) => (
           <button
             className={activePanel === item.id ? "active" : ""}
             key={item.id}
             onClick={() => setActivePanel(item.id)}
             type="button"
-            title={item.label}
+            title={t(item.label)}
             aria-current={activePanel === item.id ? "page" : undefined}
           >
             <item.icon size={19} />
-            <span>{item.label}</span>
+            <span>{t(item.label)}</span>
           </button>
         ))}
-        <button type="button" ref={mobileMenuButtonRef} className={!mobileNav.some((item) => item.id === activePanel) ? "active" : ""} aria-expanded={mobileMenuOpen} aria-haspopup="dialog" onClick={() => setMobileMenuOpen(true)}><Menu size={19} aria-hidden="true" /><span>更多</span></button>
+        <button type="button" ref={mobileMenuButtonRef} className={!mobileNav.some((item) => item.id === activePanel) ? "active" : ""} aria-expanded={mobileMenuOpen} aria-haspopup="dialog" onClick={() => setMobileMenuOpen(true)}><Menu size={19} aria-hidden="true" /><span>{t("更多")}</span></button>
       </nav>
     </div>
   );
@@ -1022,6 +1036,7 @@ function UploadPanel({
   setQuestionText: (value: string) => void;
   onPublish: () => void;
 }) {
+  const { t, locale } = useLocale();
   const liveInputRef = useRef<HTMLTextAreaElement | null>(null);
   const liveQuality = liveSummary?.quality ?? {
     coverage: liveSummary ? 1 : 0,
@@ -1046,25 +1061,25 @@ function UploadPanel({
   return (
     <div className="upload-layout">
       <section className="panel upload-card">
-        <PanelHeader icon={UploadCloud} title="数据导入中心" action="PDF / Excel / 阅卷 / 表单" />
+        <PanelHeader icon={UploadCloud} title={t("数据导入中心")} action={t("PDF / Excel / 阅卷 / 表单")} />
         <div className="demo-notice">
           <ShieldCheck size={17} />
-          <span>文件解析入口为模拟流程；真实成绩表可在下方试用台本地解析，不会保存到服务器。</span>
+          <span>{t("文件解析入口为模拟流程；真实成绩表可在下方试用台本地解析，不会保存到服务器。")}</span>
         </div>
         <div className="import-source-grid">
           {importSources.map((source) => (
             <article className="import-source-card" key={source.id}>
-              <span>{source.status}</span>
-              <strong>{source.title}</strong>
-              <p>{source.description}</p>
-              <small>{source.sample}</small>
+              <span>{t(source.status)}</span>
+              <strong>{t(source.title)}</strong>
+              <p>{t(source.description)}</p>
+              <small>{t(source.sample)}</small>
             </article>
           ))}
         </div>
         <label className="drop-zone">
           <UploadCloud size={34} />
           <span>{fileName}</span>
-          <small>点击选择文件，演示版会生成模拟解析结果</small>
+          <small>{t("点击选择文件，演示版会生成模拟解析结果")}</small>
           <input
             accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
             onChange={(event) => {
@@ -1087,20 +1102,16 @@ function UploadPanel({
             }}
             type="button"
           >
-            <RefreshCw size={16} />
-            恢复样例
-          </button>
+            <RefreshCw size={16} />{t("恢复样例")}</button>
           <button className="primary-button" onClick={onPublish} type="button">
-            <Send size={16} />
-            发布练习
-          </button>
+            <Send size={16} />{t("发布练习")}</button>
         </div>
       </section>
 
       <section className="panel editor-card">
-        <PanelHeader icon={FileText} title="题目文本" action="自动识别题型与答案" />
+        <PanelHeader icon={FileText} title={t("题目文本")} action={t("自动识别题型与答案")} />
         <textarea
-          aria-label="题目文本"
+          aria-label={t("题目文本")}
           value={questionText}
           onChange={(event) => {
             setQuestionText(event.target.value);
@@ -1110,7 +1121,7 @@ function UploadPanel({
       </section>
 
       <section className="panel parse-card">
-        <PanelHeader icon={Sparkles} title="解析确认" action={analysisReady ? "已完成 · 老师可编辑" : "解析中"} />
+        <PanelHeader icon={Sparkles} title={t("解析确认")} action={t(analysisReady ? "已完成 · 老师可编辑" : "解析中")} />
         <div className="parse-steps">
           {[
             ["题型识别", "阅读理解 · 推理判断"],
@@ -1121,74 +1132,66 @@ function UploadPanel({
             <div className="parse-step" key={title}>
               <span className={analysisReady || index < 2 ? "step-dot done" : "step-dot"} />
               <div>
-                <strong>{title}</strong>
-                <small>{value}</small>
+                <strong>{t(title)}</strong>
+                <small>{t(value)}</small>
               </div>
             </div>
           ))}
         </div>
         <div className="field-mapping">
           <div className="field-title">
-            <span>字段映射预览</span>
-            <small>来源字段会先匿名化，再进入学情分析</small>
+            <span>{t("字段映射预览")}</span>
+            <small>{t("来源字段会先匿名化，再进入学情分析")}</small>
           </div>
           <div className="field-head">
-            <span>来源字段</span>
-            <span>平台字段</span>
-            <span>状态</span>
+            <span>{t("来源字段")}</span>
+            <span>{t("平台字段")}</span>
+            <span>{t("状态")}</span>
           </div>
           {fieldMappingRows.map((row) => (
             <div className="field-row" key={`${row.source}-${row.target}`}>
-              <strong>{row.source}</strong>
-              <span>{row.target}</span>
-              <b>{row.quality}</b>
-              <small>{row.note}</small>
+              <strong>{t(row.source)}</strong>
+              <span>{t(row.target)}</span>
+              <b>{t(row.quality)}</b>
+              <small>{t(row.note)}</small>
             </div>
           ))}
         </div>
         <div className="mini-table">
           <div>
-            <span>识别题数</span>
+            <span>{t("识别题数")}</span>
             <b>6</b>
           </div>
           <div>
-            <span>预计批改</span>
-            <b>44人</b>
+            <span>{t("预计批改")}</span>
+            <b>{t("44人")}</b>
           </div>
           <div>
-            <span>错因标签</span>
-            <b>9类</b>
+            <span>{t("错因标签")}</span>
+            <b>{t("9类")}</b>
           </div>
         </div>
       </section>
 
       <section className="panel live-data-card">
-        <PanelHeader icon={ClipboardList} title="真实数据试用台" action="本地解析 · 不上传" />
+        <PanelHeader icon={ClipboardList} title={t("真实数据试用台")} action={t("本地解析 · 不上传")} />
         <div className="live-privacy-note">
           <ShieldCheck size={17} />
-          <span>可以粘贴 Excel 表格或上传 CSV。数据只在当前浏览器里计算，不会发送到服务器；预览默认匿名化学生姓名。</span>
+          <span>{t("可以粘贴 Excel 表格或上传 CSV。数据只在当前浏览器里计算，不会发送到服务器；预览默认匿名化学生姓名。")}</span>
         </div>
         <div className="live-toolbar">
           <button className="secondary-button" onClick={onLoadLiveSample} type="button">
-            <RefreshCw size={16} />
-            载入样例
-          </button>
+            <RefreshCw size={16} />{t("载入样例")}</button>
           <button
             className="primary-button"
             onClick={() => onAnalyzeLiveCsv(liveInputRef.current?.value ?? liveCsv)}
             type="button"
           >
-            <Sparkles size={16} />
-            解析学情
-          </button>
+            <Sparkles size={16} />{t("解析学情")}</button>
           <button className="secondary-button" onClick={onDownloadLiveSample} type="button">
-            <Download size={16} />
-            下载样例CSV
-          </button>
+            <Download size={16} />{t("下载样例CSV")}</button>
           <label className="secondary-button file-button">
-            <UploadCloud size={16} />
-            上传CSV
-            <input
+            <UploadCloud size={16} />{t("上传CSV")}<input
               accept=".csv,.txt,.tsv"
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -1197,147 +1200,145 @@ function UploadPanel({
               type="file"
             />
           </label>
-          <button className="secondary-button" onClick={onClearLiveData} type="button">
-            清空
-          </button>
+          <button className="secondary-button" onClick={onClearLiveData} type="button">{t("清空")}</button>
         </div>
         <div className="paste-target-hint">
-          <strong>复制粘贴位置</strong>
-          <span>把下面给老师看的 CSV/Excel 数据粘贴到这个大输入框，再点击“解析学情”。</span>
+          <strong>{t("复制粘贴位置")}</strong>
+          <span>{t("把下面给老师看的 CSV/Excel 数据粘贴到这个大输入框，再点击“解析学情”。")}</span>
         </div>
         <textarea
           className="live-data-input"
-          aria-label="学生成绩表"
+          aria-label={t("学生成绩表")}
           maxLength={MAX_LIVE_DATA_CHARS}
           onChange={(event) => setLiveCsv(event.target.value.slice(0, MAX_LIVE_DATA_CHARS))}
-          placeholder="从 Excel 复制表头和学生成绩后粘贴到这里，或上传 CSV 文件。"
+          placeholder={t("从 Excel 复制表头和学生成绩后粘贴到这里，或上传 CSV 文件。")}
           ref={liveInputRef}
           value={liveCsv}
         />
         <div className={liveSummary ? "live-message ready" : "live-message"} role="status">
           <CircleCheck size={16} />
-          <span>{liveMessage}</span>
+          <span>{t(liveMessage)}</span>
         </div>
         {liveSummary ? (
           <div className="live-analysis">
-            <section className="data-quality-gate" aria-label="数据质量检查">
+            <section className="data-quality-gate" aria-label={t("数据质量检查")}>
               <div className="data-quality-head">
                 <div>
                   <FileCheck2 size={18} />
-                  <strong>数据质量门</strong>
-                  <span>先确认数据能不能信，再生成学情结论</span>
+                  <strong>{t("数据质量门")}</strong>
+                  <span>{t("先确认数据能不能信，再生成学情结论")}</span>
                 </div>
                 <b className={qualityNeedsReview ? "needs-review" : "ready"}>
-                  {qualityNeedsReview ? "建议老师确认" : "可直接分析"}
+                  {t(qualityNeedsReview ? "建议老师确认" : "可直接分析")}
                 </b>
               </div>
               <div className="data-quality-grid">
                 <div>
-                  <span>得分识别覆盖率</span>
-                  <strong>{percent(liveQuality.coverage)}</strong>
-                  <small>{liveQuality.validScoreCells}/{liveQuality.totalScoreCells} 个得分单元</small>
+                  <span>{t("得分识别覆盖率")}</span>
+                  <strong>{t(percent(liveQuality.coverage))}</strong>
+                  <small>{t(liveQuality.validScoreCells)}/{t(liveQuality.totalScoreCells)}{t(" 个得分单元")}</small>
                 </div>
                 <div>
-                  <span>缺失得分</span>
-                  <strong>{liveQuality.missingScoreCells}</strong>
-                  <small>缺失值不会自动按 0 分计算</small>
+                  <span>{t("缺失得分")}</span>
+                  <strong>{t(liveQuality.missingScoreCells)}</strong>
+                  <small>{t("缺失值不会自动按 0 分计算")}</small>
                 </div>
                 <div>
-                  <span>重复学生记录</span>
-                  <strong>{liveQuality.duplicateRows}</strong>
-                  <small>按学号 / 学生ID / 姓名检查</small>
+                  <span>{t("重复学生记录")}</span>
+                  <strong>{t(liveQuality.duplicateRows)}</strong>
+                  <small>{t("按学号 / 学生ID / 姓名检查")}</small>
                 </div>
                 <div>
-                  <span>待补基础字段</span>
-                  <strong>{liveQuality.missingIdentityRows + liveQuality.missingClassRows}</strong>
-                  <small>缺姓名 {liveQuality.missingIdentityRows} · 缺班级 {liveQuality.missingClassRows}</small>
+                  <span>{t("待补基础字段")}</span>
+                  <strong>{t(liveQuality.missingIdentityRows + liveQuality.missingClassRows)}</strong>
+                  <small>{t("缺姓名 ")}{t(liveQuality.missingIdentityRows)}{t(" · 缺班级 ")}{t(liveQuality.missingClassRows)}</small>
                 </div>
               </div>
               <div className="data-quality-details" role="status">
-                <span>异常得分 <b>{liveQuality.invalidScoreCells}</b></span>
-                <span>总分口径差异 <b>{liveQuality.totalMismatchRows}</b></span>
-                <span>满分待确认 <b>{liveQuality.unconfirmedColumns.length}</b></span>
+                <span>{t("异常得分 ")}<b>{t(liveQuality.invalidScoreCells)}</b></span>
+                <span>{t("总分口径差异 ")}<b>{t(liveQuality.totalMismatchRows)}</b></span>
+                <span>{t("满分待确认 ")}<b>{t(liveQuality.unconfirmedColumns.length)}</b></span>
               </div>
-              {liveQuality.issues.length > 0 && <ul className="quality-issues">{liveQuality.issues.slice(0, 6).map((issue, index) => <li key={index}>第 {issue.row} 行 · {issue.field}：{issue.message}</li>)}</ul>}
-              {liveQuality.unconfirmedColumns.length > 0 && <p>请在自定义得分表头标注“满分10”等满分信息：{liveQuality.unconfirmedColumns.join("、")}。</p>}
+              {liveQuality.issues.length > 0 && <ul className="quality-issues">{liveQuality.issues.slice(0, 6).map((issue, index) => <li key={index}>{t("第 ")}{t(issue.row)}{t(" 行 · ")}{t(issue.field)}：{t(issue.message)}</li>)}</ul>}
+              {liveQuality.unconfirmedColumns.length > 0 && <p>{t("请在自定义得分表头标注“满分10”等满分信息：")}{t(liveQuality.unconfirmedColumns.join("、"))}。</p>}
               <p>
-                {qualityNeedsReview
+                {t(qualityNeedsReview
                   ? "已保留可分析记录；建议先核对黄色提示项，避免把缺失数据误判为学生失分。"
-                  : "字段完整、记录无重复；当前数据已通过演示版检查，可进入薄弱题和学生跟进分析。"}
+                  : "字段完整、记录无重复；当前数据已通过演示版检查，可进入薄弱题和学生跟进分析。")}
               </p>
             </section>
             <div className="live-metrics">
               <MetricCard
                 icon={Users}
-                label="已解析学生"
+                label={t("已解析学生")}
                 tone="blue"
-                value={`${liveSummary.rowCount}人`}
-                trend={liveSummary.classNames.join(" / ")}
+                value={t("{0}人", [liveSummary.rowCount])}
+                trend={t(liveSummary.classNames.join(" / "))}
               />
               <MetricCard
                 icon={Target}
-                label="有效小题均分"
+                label={t("有效小题均分")}
                 tone="green"
-                value={liveSummary.averageTotal === null ? "暂无得分" : `${liveSummary.averageTotal.toFixed(1)}分`}
-                trend={`有效作答 ${liveSummary.scoredStudents}人 · 有效题达成率 ${percent(liveSummary.averageRate)}`}
+                value={t(liveSummary.averageTotal === null ? "暂无得分" : `${liveSummary.averageTotal.toFixed(1)}分`)}
+                trend={t("有效作答 {0}人 · 有效题达成率 {1}", [liveSummary.scoredStudents, percent(liveSummary.averageRate)])}
               />
               <MetricCard
                 icon={AlertTriangle}
-                label="需跟进"
+                label={t("需跟进")}
                 tone="red"
-                value={`${liveSummary.riskCount}人`}
-                trend="仅统计有有效得分的学生"
+                value={t("{0}人", [liveSummary.riskCount])}
+                trend={t("仅统计有有效得分的学生")}
               />
               <MetricCard
                 icon={ClipboardCheck}
-                label="订正完成"
+                label={t("订正完成")}
                 tone="orange"
-                value={`${liveSummary.completedCorrection}/${liveSummary.rowCount}`}
-                trend="来自订正完成列"
+                value={t("{0}/{1}", [liveSummary.completedCorrection, liveSummary.rowCount])}
+                trend={t("来自订正完成列")}
               />
             </div>
             <div className="live-detail-grid">
               <div className="live-weak-panel">
-                <strong>薄弱题与即时教学建议</strong>
+                <strong>{t("薄弱题与即时教学建议")}</strong>
                 {liveSummary.weakItems.map((item) => (
                   <article className="live-weak-row" key={item.field}>
                     <div>
-                      <span>{item.type}</span>
-                      <strong>{item.label}</strong>
-                      <small>{item.cause} · {item.weakCount}人需跟进</small>
+                      <span>{t(item.type)}</span>
+                      <strong>{t(item.label)}</strong>
+                      <small>{t(item.cause)} · {t("{0}人需跟进", [item.weakCount])}</small>
                     </div>
-                    <b>{percent(item.averageRate)}</b>
-                    <p>{item.suggestion}</p>
+                    <b>{t(percent(item.averageRate))}</b>
+                    <p>{t(item.suggestion)}</p>
                   </article>
                 ))}
               </div>
               <div className="live-weak-panel compact">
-                <strong>高频错因</strong>
+                <strong>{t("高频错因")}</strong>
                 {liveSummary.causeCounts.map((item) => (
                   <div className="cause-count-row" key={item.cause}>
-                    <span>{item.cause}</span>
-                    <b>{item.count}次</b>
+                    <span>{t(item.cause)}</span>
+                    <b>{t("{0}次", [item.count])}</b>
                   </div>
                 ))}
               </div>
             </div>
             <div className="live-preview">
               <div className="field-title">
-                <span>匿名学生预览</span>
-                <small>真实姓名不会在预览里完整显示</small>
+                <span>{t("匿名学生预览")}</span>
+                <small>{t("真实姓名不会在预览里完整显示")}</small>
               </div>
               <div className="live-preview-head">
-                <span>学生</span>
-                <span>班级</span>
-                <span>总分</span>
-                <span>薄弱项</span>
+                <span>{t("学生")}</span>
+                <span>{t("班级")}</span>
+                <span>{t("总分")}</span>
+                <span>{t("薄弱项")}</span>
               </div>
               {liveSummary.students.map((student, index) => (
                 <div className="live-preview-row" key={`${student.id}-${index}`}>
-                  <strong>{student.displayName}</strong>
+                  <strong>{locale === "en" ? `Student ${String(index + 1).padStart(2, "0")}` : student.displayName}</strong>
                   <span>{student.className}</span>
-                  <span>{student.total === null ? "未评分" : student.total.toFixed(1)}</span>
-                  <b>{student.weakItems.length}项</b>
+                  <span>{t(student.total === null ? "未评分" : student.total.toFixed(1))}</span>
+                  <b>{t("{0}项", [student.weakItems.length])}</b>
                 </div>
               ))}
             </div>
@@ -1345,7 +1346,7 @@ function UploadPanel({
         ) : (
           <div className="empty-live-state">
             <ClipboardList size={24} />
-            <span>粘贴或上传数据后，点击“解析学情”生成即时看板。</span>
+            <span>{t("粘贴或上传数据后，点击“解析学情”生成即时看板。")}</span>
           </div>
         )}
       </section>
@@ -1378,6 +1379,7 @@ function ResultsPanel({
   setEssayFileName: (value: string) => void;
   setEssayText: (value: string) => void;
 }) {
+  const { t, locale } = useLocale();
   const handleEssayFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1400,21 +1402,21 @@ function ResultsPanel({
   return (
     <div className="page-grid">
       <section className="metric-grid">
-        <MetricCard icon={CircleCheck} label="自动判分" tone="green" value="264份" trend="选择题已完成" />
-        <MetricCard icon={Brain} label="AI反馈" tone="blue" value="72条" trend="作文与续写建议" />
-        <MetricCard icon={Target} label="低分题" tone="red" value="3题" trend="正确率低于60%" />
-        <MetricCard icon={Download} label="导出" tone="orange" value="Excel" trend="班级与个人报告" />
+        <MetricCard icon={CircleCheck} label={t("自动判分")} tone="green" value={t("264份")} trend={t("选择题已完成")} />
+        <MetricCard icon={Brain} label={t("AI反馈")} tone="blue" value={t("72条")} trend={t("作文与续写建议")} />
+        <MetricCard icon={Target} label={t("低分题")} tone="red" value={t("3题")} trend={t("正确率低于60%")} />
+        <MetricCard icon={Download} label={t("导出")} tone="orange" value={t("Excel")} trend={t("班级与个人报告")} />
       </section>
 
       <section className="panel">
-        <PanelHeader icon={FileCheck2} title="题目批改结果" action="点击查看诊断" />
+        <PanelHeader icon={FileCheck2} title={t("题目批改结果")} action={t("点击查看诊断")} />
         <div className="result-table">
           <div className="table-head">
-            <span>题号</span>
-            <span>题型</span>
-            <span>正确率</span>
-            <span>主要误因</span>
-            <span>操作</span>
+            <span>{t("题号")}</span>
+            <span>{t("题型")}</span>
+            <span>{t("正确率")}</span>
+            <span>{t("主要误因")}</span>
+            <span>{t("操作")}</span>
           </div>
           {questions.map((question) => (
             <button
@@ -1423,14 +1425,13 @@ function ResultsPanel({
               onClick={() => onSelectQuestion(question.id)}
               type="button"
             >
-              <span>Q{question.number}</span>
-              <span>{question.questionType}</span>
+              <span>Q{t(question.number)}</span>
+              <span>{t(question.questionType)}</span>
               <span>
                 <Progress value={question.correctRate * 100} />
               </span>
-              <span>{question.diagnosis.causes.slice(0, 2).join(" / ")}</span>
-              <span className="row-action">
-                查看 <ChevronRight size={16} />
+              <span>{t(question.diagnosis.causes.slice(0, 2).join(" / "))}</span>
+              <span className="row-action">{t("查看 ")}<ChevronRight size={16} />
               </span>
             </button>
           ))}
@@ -1440,13 +1441,13 @@ function ResultsPanel({
       <section className="panel essay-live-panel">
         <PanelHeader
           icon={Sparkles}
-          title="作文批改试用台"
-          action={deepSeekApiKey ? `DeepSeek · ${deepSeekModel}` : "无 Key 先看样例"}
+          title={t("作文批改试用台")}
+          action={t(deepSeekApiKey ? `DeepSeek · ${deepSeekModel}` : "无 Key 先看样例")}
         />
         <div className="essay-live-grid">
           <div className="essay-live-editor">
             <div className="essay-live-meta">
-              <span>作文/续写原文</span>
+              <span>{t("作文/续写原文")}</span>
               <b>{essayFileName}</b>
             </div>
             <label className="essay-key-row">
@@ -1455,38 +1456,34 @@ function ResultsPanel({
                 autoComplete="new-password"
                 maxLength={512}
                 onChange={(event) => setDeepSeekApiKey(event.target.value)}
-                placeholder="可选：粘贴 Key 后批改真实文本"
+                placeholder={t("可选：粘贴 Key 后批改真实文本")}
                 spellCheck={false}
                 type="password"
                 value={deepSeekApiKey}
               />
-              <small>{deepSeekApiKey ? "Key 仅在当前页面临时使用，刷新后自动清除。" : "不填 Key 会显示本地样例批改结果。"}</small>
+              <small>{t(deepSeekApiKey ? "Key 仅在当前页面临时使用，刷新后自动清除。" : "不填 Key 会显示本地样例批改结果。")}</small>
             </label>
             <textarea
               className="essay-live-input"
-              aria-label="学生作文原文"
+              aria-label={t("学生作文原文")}
               maxLength={MAX_ESSAY_CHARS}
               onChange={(event) => setEssayText(event.target.value.slice(0, MAX_ESSAY_CHARS))}
-              placeholder="把学生作文、读后续写或应用文原文粘贴到这里。演示版支持 txt/csv 文本上传；Word/PDF 可在正式版接入解析服务。"
+              placeholder={t("把学生作文、读后续写或应用文原文粘贴到这里。演示版支持 txt/csv 文本上传；Word/PDF 可在正式版接入解析服务。")}
               value={essayText}
             />
             <div className="essay-live-actions">
               <label className="secondary-button file-button">
-                <UploadCloud size={16} />
-                上传文本
-                <input accept=".txt,.csv,.md,text/plain,text/csv" onChange={handleEssayFileChange} type="file" />
+                <UploadCloud size={16} />{t("上传文本")}<input accept=".txt,.csv,.md,text/plain,text/csv" onChange={handleEssayFileChange} type="file" />
               </label>
               <button
                 className="secondary-button"
                 onClick={() => {
                   setEssayText(demoEssayText);
-                  setEssayFileName("样例续写作文.txt");
+                  setEssayFileName("sample-story-continuation.txt");
                 }}
                 type="button"
               >
-                <RefreshCw size={16} />
-                载入样例
-              </button>
+                <RefreshCw size={16} />{t("载入样例")}</button>
               <button
                 className="primary-button"
                 disabled={essayCorrectionState.status === "loading"}
@@ -1494,60 +1491,56 @@ function ResultsPanel({
                 type="button"
               >
                 <Sparkles size={16} />
-                {essayCorrectionState.status === "loading" ? "批改中" : "批改作文"}
+                {t(essayCorrectionState.status === "loading" ? "批改中" : "批改作文")}
               </button>
             </div>
-            <p className="essay-live-note">
-              点击批改才会把文本发送给 DeepSeek；发送前会在本地移除显式邮箱、电话、身份证号、姓名和学号字段。仍请先人工检查其他可识别信息。无 API Key 时会展示本地样例结果。
-            </p>
+            <p className="essay-live-note">{t("点击批改才会把文本发送给 DeepSeek；发送前会在本地移除显式邮箱、电话、身份证号、姓名和学号字段。仍请先人工检查其他可识别信息。无 API Key 时会展示本地样例结果。")}</p>
           </div>
           <div className={`deepseek-output essay-correction-output ${essayCorrectionState.status}`}>
-            <span>{essayCorrectionState.message}</span>
-            <pre>{essayCorrectionState.result || "这里会显示作文总评、40分制得分、片段批注、修改示范、同类微练习和教学启示。"}</pre>
+            <span>{t(essayCorrectionState.message)}</span>
+            <pre>{essayCorrectionState.status === "success" ? essayCorrectionState.result : t(essayCorrectionState.result || "这里会显示作文总评、40分制得分、片段批注、修改示范、同类微练习和教学启示。")}</pre>
             <button
               className="secondary-button"
               disabled={!essayCorrectionState.result}
               onClick={() => {
-                void navigator.clipboard?.writeText(essayCorrectionState.result);
+                void navigator.clipboard?.writeText(essayCorrectionState.status === "success" ? essayCorrectionState.result : t(essayCorrectionState.result));
               }}
               type="button"
             >
-              <ClipboardCheck size={16} />
-              复制批改结果
-            </button>
+              <ClipboardCheck size={16} />{t("复制批改结果")}</button>
           </div>
         </div>
       </section>
 
       <section className="panel rubric-panel">
-        <PanelHeader icon={BadgeCheck} title="高考写作评分标准库" action="应用文 / 读后续写 / 40分综合" />
+        <PanelHeader icon={BadgeCheck} title={t("高考写作评分标准库")} action={t("应用文 / 读后续写 / 40分综合")} />
         <div className="rubric-standard-grid">
           {writingRubricStandards.map((standard) => (
             <article className="rubric-standard-card" key={standard.id}>
               <div className="rubric-standard-head">
-                <span>{standard.examUse}</span>
-                <strong>{standard.title}</strong>
-                <b>{standard.totalScore}分</b>
+                <span>{t(standard.examUse)}</span>
+                <strong>{t(standard.title)}</strong>
+                <b>{t("{0}分", [standard.totalScore])}</b>
               </div>
-              <p>{standard.summary}</p>
+              <p>{t(standard.summary)}</p>
               <div className="rubric-dimension-list">
                 {standard.dimensions.slice(0, 4).map((dimension) => (
                   <div key={dimension.name}>
-                    <span>{dimension.weight}分</span>
-                    <strong>{dimension.name}</strong>
-                    <small>{dimension.teacherCheck}</small>
+                    <span>{t("{0}分", [dimension.weight])}</span>
+                    <strong>{t(dimension.name)}</strong>
+                    <small>{t(dimension.teacherCheck)}</small>
                   </div>
                 ))}
               </div>
               <div className="rubric-band-list">
                 {standard.bands.slice(0, 3).map((band) => (
                   <span key={`${standard.id}-${band.label}`}>
-                    {band.label} {band.scoreRange}
+                    {t(band.label)} {t(band.scoreRange)}
                   </span>
                 ))}
               </div>
               <a href={standard.sourceUrl} rel="noreferrer" target="_blank">
-                {standard.sourceLabel} <ExternalLink size={13} />
+                {t(standard.sourceLabel)} <ExternalLink size={13} />
               </a>
             </article>
           ))}
@@ -1555,90 +1548,88 @@ function ResultsPanel({
       </section>
 
       <section className="panel essay-stress-panel">
-        <PanelHeader icon={Activity} title="批量模拟测试数据" action={`${essayStressSummary.total}篇 · 本地压力测试`} />
+        <PanelHeader icon={Activity} title={t("批量模拟测试数据")} action={t("{0}篇 · 本地压力测试", [essayStressSummary.total])} />
         <div className="stress-summary-grid">
           <div>
-            <span>应用文</span>
-            <strong>{essayStressSummary.application}</strong>
+            <span>{t("应用文")}</span>
+            <strong>{t(essayStressSummary.application)}</strong>
           </div>
           <div>
-            <span>读后续写</span>
-            <strong>{essayStressSummary.continuation}</strong>
+            <span>{t("读后续写")}</span>
+            <strong>{t(essayStressSummary.continuation)}</strong>
           </div>
           {essayStressSummary.bands.map((item) => (
             <div key={item.band}>
-              <span>{item.band}</span>
-              <strong>{item.count}</strong>
+              <span>{t(item.band)}</span>
+              <strong>{t(item.count)}</strong>
             </div>
           ))}
         </div>
         <div className="stress-sample-grid">
           {essayStressSamples.slice(0, 6).map((sample) => (
             <article key={sample.id}>
-              <span>{sample.type} · {sample.band}</span>
-              <strong>{sample.id} · {sample.expectedScore}分</strong>
-              <p>{sample.mainIssue}</p>
+              <span>{t(sample.type)} · {t(sample.band)}</span>
+              <strong>{sample.id} · {t("{0}分", [sample.expectedScore])}</strong>
+              <p>{t(sample.mainIssue)}</p>
             </article>
           ))}
         </div>
         <div className="stress-actions">
           <button
             className="secondary-button"
-            onClick={() => downloadTextFile(essayStressCsv, "essay-correction-stress-samples.csv")}
+            onClick={() => downloadTextFile(sampleEssaysForLocale(locale), `essay-correction-stress-samples-${locale}.csv`)}
             type="button"
           >
-            <Download size={16} />
-            下载模拟作文数据
-          </button>
+            <Download size={16} />{t("下载模拟作文数据")}</button>
           {essayStressSummary.passCriteria.map((item) => (
-            <span key={item}>{item}</span>
+            <span key={item}>{t(item)}</span>
           ))}
         </div>
       </section>
 
       <section className="panel rubric-panel">
-        <PanelHeader icon={MessageSquareText} title="续写 Rubric 与 QuickMarks" action="标准化反馈示例" />
+        <PanelHeader icon={MessageSquareText} title={t("续写 Rubric 与 QuickMarks")} action={t("标准化反馈示例")} />
         <div className="rubric-table">
           <div className="rubric-head">
-            <span>维度</span>
-            <span>得分</span>
-            <span>主要问题</span>
-            <span>可复用评语</span>
+            <span>{t("维度")}</span>
+            <span>{t("得分")}</span>
+            <span>{t("主要问题")}</span>
+            <span>{t("可复用评语")}</span>
           </div>
           {writingRubricRows.map((row) => (
             <div className="rubric-row" key={row.criterion}>
-              <strong>{row.criterion}</strong>
-              <b>{row.score}</b>
-              <span>{row.issue}</span>
-              <span>{row.quickMark}</span>
+              <strong>{t(row.criterion)}</strong>
+              <b>{t(row.score)}</b>
+              <span>{t(row.issue)}</span>
+              <span>{t(row.quickMark)}</span>
             </div>
           ))}
         </div>
       </section>
 
       <section className="panel essay-workbench">
-        <PanelHeader icon={MessageSquareText} title="作文批改工作台" action="原文批注 + 二次修改" />
+        <PanelHeader icon={MessageSquareText} title={t("作文批改工作台")} action={t("原文批注 + 二次修改")} />
         <div className="essay-grid">
           <article className="essay-original">
-            <span>{essayWorkbench.student} · {essayWorkbench.task}</span>
-            <p>{essayWorkbench.original}</p>
+            <span>{t(essayWorkbench.student)} · {t(essayWorkbench.task)}</span>
+            <p>{t(essayWorkbench.original)}</p>
           </article>
           <article className="essay-comments">
-            <strong>逐句批注</strong>
+            <strong>{t("逐句批注")}</strong>
             {essayWorkbench.inlineComments.map((item) => (
               <div className="essay-comment" key={`${item.fragment}-${item.type}`}>
-                <span>{item.type}</span>
-                <b>{item.fragment}</b>
-                <p>{item.comment}</p>
+                <span>{t(item.type)}</span>
+                <b>{t(item.fragment)}</b>
+                <p>{t(item.comment)}</p>
               </div>
             ))}
           </article>
           <article className="essay-score-card">
-            <strong>Rubric 得分</strong>
+            <strong>{t("Rubric 得分")}</strong>
             {essayWorkbench.scores.map((score) => (
               <div className="essay-score" key={score.label}>
-                <span>{score.label}</span>
-                <b>{score.value}/{score.max}</b>
+                <span>{t(score.label)}</span>
+                <b>{t(score.value)}/{t(score.max)}</b>
                 <Progress value={(score.value / score.max) * 100} />
               </div>
             ))}
@@ -1646,12 +1637,12 @@ function ResultsPanel({
         </div>
         <div className="essay-revision">
           <div>
-            <span>AI 修改建议 · 老师可编辑</span>
-            <p>{essayWorkbench.revision}</p>
+            <span>{t("AI 修改建议 · 老师可编辑")}</span>
+            <p>{t(essayWorkbench.revision)}</p>
           </div>
           <div className="teacher-control-list">
             {essayWorkbench.teacherControl.map((item) => (
-              <span key={item}>{item}</span>
+              <span key={item}>{t(item)}</span>
             ))}
           </div>
         </div>
@@ -1675,6 +1666,7 @@ function DiagnosisPanel({
   setSelectedQuestionId: (id: string) => void;
   onGeneratePractice: () => void;
 }) {
+  const { t } = useLocale();
   const wrongAttempts = attempts.filter((attempt) => attempt.questionId === question.id && !attempt.isCorrect);
   const rightAttempts = attempts.filter((attempt) => attempt.questionId === question.id && attempt.isCorrect);
   const questionAttemptCount = wrongAttempts.length + rightAttempts.length;
@@ -1703,7 +1695,7 @@ function DiagnosisPanel({
   return (
     <div className="diagnosis-layout">
       <section className="panel question-picker">
-        <PanelHeader icon={ClipboardList} title="题目列表" action="题库参考正确率 · 非班级统计" />
+        <PanelHeader icon={ClipboardList} title={t("题目列表")} action={t("题库参考正确率 · 非班级统计")} />
         <div className="chip-list vertical">
           {questions.map((item) => (
             <button
@@ -1712,9 +1704,9 @@ function DiagnosisPanel({
               onClick={() => setSelectedQuestionId(item.id)}
               type="button"
             >
-              <span>Q{item.number}</span>
-              <strong>{item.questionType}</strong>
-              <small>{percent(item.correctRate)}</small>
+              <span>Q{t(item.number)}</span>
+              <strong>{t(item.questionType)}</strong>
+              <small>{t(percent(item.correctRate))}</small>
             </button>
           ))}
         </div>
@@ -1723,63 +1715,61 @@ function DiagnosisPanel({
       <section className="panel diagnosis-main">
         <div className="diagnosis-heading">
           <div>
-            <p className="eyebrow">{question.passageTheme}</p>
-            <h2>Q{question.number}. {question.title}</h2>
+            <p className="eyebrow">{t(question.passageTheme)}</p>
+            <h2>Q{t(question.number)}. {t(question.title)}</h2>
           </div>
           <button className="primary-button" onClick={onGeneratePractice} type="button">
-            <Sparkles size={16} />
-            生成同类练习
-          </button>
+            <Sparkles size={16} />{t("生成同类练习")}</button>
         </div>
 
         <div className="diagnosis-cards">
           <div className="diagnosis-card">
-            <span>错题类型</span>
-            <strong>{question.questionType}</strong>
-            <small>参考答案：{question.answer}</small>
+            <span>{t("错题类型")}</span>
+            <strong>{t(question.questionType)}</strong>
+            <small>{t("参考答案：")}{t(question.answer)}</small>
           </div>
           <div className="diagnosis-card">
-            <span>错误比例</span>
-            <strong>{percent(wrongRate)}</strong>
-            <small>{questionAttemptCount} 份本题作答 · 主要误选：{question.topWrongOption}</small>
+            <span>{t("错误比例")}</span>
+            <strong>{t(percent(wrongRate))}</strong>
+            <small>{t(questionAttemptCount)}{t(" 份本题作答 · 主要误选：")}{t(question.topWrongOption)}</small>
           </div>
           <div className="diagnosis-card">
-            <span>平均用时</span>
-            <strong>{question.averageTime}s</strong>
-            <small>{question.averageTime > 180 ? "写作题" : "阅读题"}</small>
+            <span>{t("平均用时")}</span>
+            <strong>{t(question.averageTime)}s</strong>
+            <small>{t(question.averageTime > 180 ? "写作题" : "阅读题")}</small>
           </div>
         </div>
 
         <div className="reason-block">
-          <PanelHeader icon={SearchCheck} title="错误原因分析" action="可能错因 · 待教师复核" />
+          <PanelHeader icon={SearchCheck} title={t("错误原因分析")} action={t("可能错因 · 待教师复核")} />
           <div className="tag-row">
             {question.diagnosis.causes.map((cause) => (
-              <span className="tag" key={cause}>{cause}</span>
+              <span className="tag" key={cause}>{t(cause)}</span>
             ))}
           </div>
-          <p className="question-response-evidence">{questionAttemptCount ? `当前筛选范围：${questionAttemptCount} 份本题作答，${rightAttempts.length} 份正确、${wrongAttempts.length} 份错误。` : "当前筛选范围暂无本题作答记录。"}</p>
-          <small>以下为题库错因假设，待教师结合原文和学生解释复核。</small>
-          <p>{question.diagnosis.narrative}</p>
+          <p className="question-response-evidence">{t(questionAttemptCount ? `当前筛选范围：${questionAttemptCount} 份本题作答，${rightAttempts.length} 份正确、${wrongAttempts.length} 份错误。` : "当前筛选范围暂无本题作答记录。")}</p>
+          <small>{t("以下为题库错因假设，待教师结合原文和学生解释复核。")}</small>
+          <p>{t(question.diagnosis.narrative)}</p>
         </div>
 
         <div className="teacher-output">
-          <span>可落地输出</span>
-          <strong>备课组可以把这道题拆成“错因讲评 + 变式训练 + 课后跟进”三段式微课。</strong>
+          <span>{t("可落地输出")}</span>
+          <strong>{t("备课组可以把这道题拆成“错因讲评 + 变式训练 + 课后跟进”三段式微课。")}</strong>
         </div>
 
         <div className="option-analysis">
-          <PanelHeader icon={Brain} title="误选项与学生误区" action="讲评示例 · 非本班选项统计" />
+          <PanelHeader icon={Brain} title={t("误选项与学生误区")} action={t("讲评示例 · 非本班选项统计")} />
           <div className="option-list">
             {optionRows.map((row) => (
               <article className="option-row" key={row.option}>
                 <div className="option-share">
-                  <strong>{row.option}</strong>
-                  <span>{row.share}%</span>
+                  <strong>{t(row.option)}</strong>
+                  <span>{t(row.share)}%</span>
                 </div>
                 <div>
-                  <b>{row.misconception}</b>
-                  <p>{row.evidence}</p>
-                  <small>{row.action}</small>
+                  <b>{t(row.misconception)}</b>
+                  <p>{t(row.evidence)}</p>
+                  <small>{t(row.action)}</small>
                 </div>
               </article>
             ))}
@@ -1788,20 +1778,20 @@ function DiagnosisPanel({
 
         <div className="insight-grid">
           <div className="insight-box">
-            <h3>教学启示</h3>
-            <strong>{question.diagnosis.teachingInsight.title}</strong>
-            <p>{question.diagnosis.teachingInsight.suggestion}</p>
+            <h3>{t("教学启示")}</h3>
+            <strong>{t(question.diagnosis.teachingInsight.title)}</strong>
+            <p>{t(question.diagnosis.teachingInsight.suggestion)}</p>
           </div>
           <div className="insight-box">
-            <h3>教考衔接</h3>
-            <strong>{question.diagnosis.teachingInsight.focus}</strong>
-            <p>{question.diagnosis.teachingInsight.gaokaoAlignment}</p>
+            <h3>{t("教考衔接")}</h3>
+            <strong>{t(question.diagnosis.teachingInsight.focus)}</strong>
+            <p>{t(question.diagnosis.teachingInsight.gaokaoAlignment)}</p>
           </div>
         </div>
       </section>
 
       <section className="panel student-split">
-        <PanelHeader icon={Users} title="学生分布" action={`${rightAttempts.length} 对 / ${wrongAttempts.length} 错`} />
+        <PanelHeader icon={Users} title={t("学生分布")} action={t("{0} 对 / {1} 错", [rightAttempts.length, wrongAttempts.length])} />
         <div className="donut-wrap">
           <div
             className="donut"
@@ -1809,18 +1799,18 @@ function DiagnosisPanel({
               background: `conic-gradient(#6951d5 0 ${(correctRate ?? 0) * 360}deg, #e7be65 ${(correctRate ?? 0) * 360}deg 360deg)`,
             }}
           >
-            <span>{percent(correctRate)}</span>
+            <span>{t(percent(correctRate))}</span>
           </div>
           <div className="legend-list">
-            <span><i className="blue" />正确</span>
-            <span><i className="amber" />错误</span>
+            <span><i className="blue" />{t("正确")}</span>
+            <span><i className="amber" />{t("错误")}</span>
           </div>
         </div>
         <div className="wrong-list">
           {wrongAttempts.slice(0, 6).map((attempt) => (
             <div className="wrong-student" key={`${attempt.studentId}-${attempt.questionId}`}>
-              <span>{attempt.studentName}</span>
-              <small>{attempt.cause}</small>
+              <span>{t(attempt.studentName)}</span>
+              <small>{t(attempt.cause)}</small>
             </div>
           ))}
         </div>
@@ -1844,6 +1834,7 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
   assignedMasteryTasks: string[];
   onAssignTask: (key: string) => void;
 }) {
+  const { t, locale } = useLocale();
   const [copiedAnalyticsText, setCopiedAnalyticsText] = useState("");
   const [analyticsCopyError, setAnalyticsCopyError] = useState("");
   const [masteryFilter, setMasteryFilter] = useState<"all" | "attention" | "stable">("all");
@@ -1883,7 +1874,7 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
     try {
       if (!navigator.clipboard) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(text);
-      setCopiedAnalyticsText(kind);
+      setCopiedAnalyticsText(`${kind}:${locale}`);
       setAnalyticsCopyError("");
     } catch {
       setCopiedAnalyticsText("");
@@ -1891,70 +1882,69 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
     }
   };
 
-  const lessonPlanText = `讲评课备课单（40分钟）\n\n${reviewLessonPlan
-    .map((item) => `${item.phase} · ${item.title}\n${item.output}`)
+  const lessonPlanText = `${t("讲评课备课单（40分钟）")}\n\n${reviewLessonPlan
+    .map((item) => `${t(item.phase)} · ${t(item.title)}\n${t(item.output)}`)
     .join("\n\n")}`;
   const weeklyPreviewText = reportPreviewItems
-    .map((item) => `【${item.audience}】${item.title}\n${item.detail}`)
+    .map((item) => `[${t(item.audience)}] ${t(item.title)}\n${t(item.detail)}`)
     .join("\n\n");
 
   return (
     <div className="analytics-grid">
       <section className="panel chart-panel wide">
-        <PanelHeader icon={BarChart3} title="题型 × 错因堆叠" action="阅读理解重点复盘" />
-        <div className="chart-takeaway">
-          当前最集中的问题不是单纯“不会做题”，而是篇章逻辑、词汇语境和审题边界叠加影响。
-        </div>
+        <PanelHeader icon={BarChart3} title={t("题型 × 错因堆叠")} action={t("阅读理解重点复盘")} />
+        <div className="chart-takeaway">{t("当前最集中的问题不是单纯“不会做题”，而是篇章逻辑、词汇语境和审题边界叠加影响。")}</div>
         <div className="chart-frame">
           <ResponsiveContainer height={280} width="100%" initialDimension={{ width: 320, height: 280 }}>
             <BarChart data={causeStack} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
               <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} tickFormatter={(value) => chartLabel(value, locale)} interval={locale === "en" ? 0 : undefined} angle={locale === "en" ? -25 : 0} textAnchor={locale === "en" ? "end" : "middle"} height={locale === "en" ? 48 : 30} tick={{ fontSize: 11 }} />
               <YAxis tickLine={false} axisLine={false} />
-              <Tooltip />
+              <Tooltip labelFormatter={(label) => t(String(label))} />
               <Legend />
-              <Bar dataKey="词汇" stackId="a" fill="#2563eb" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="句法" stackId="a" fill="#0f766e" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="篇章" stackId="a" fill="#f97316" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="审题" stackId="a" fill="#dc2626" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="词汇" stackId="a" fill="#2563eb" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("词汇")} />
+              <Bar dataKey="句法" stackId="a" fill="#0f766e" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("句法")} />
+              <Bar dataKey="篇章" stackId="a" fill="#f97316" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("篇章")} />
+              <Bar dataKey="审题" stackId="a" fill="#dc2626" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("审题")} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </section>
 
       <section className="panel chart-panel">
-        <PanelHeader icon={Activity} title="学生能力雷达" action="年级均值" />
+        <PanelHeader icon={Activity} title={t("学生能力雷达")} action={t("年级均值")} />
         <div className="chart-frame">
           <ResponsiveContainer height={280} width="100%" initialDimension={{ width: 320, height: 280 }}>
-            <RadarChart data={skillRadar}>
+            <RadarChart data={skillRadar} outerRadius={locale === "en" ? "48%" : "80%"}>
               <PolarGrid stroke="#d9e1ec" />
-              <PolarAngleAxis dataKey="skill" tick={{ fill: "#475569", fontSize: 12 }} />
+              <PolarAngleAxis dataKey="skill" tick={{ fill: "#475569", fontSize: 11 }} tickFormatter={(value) => chartLabel(value, locale)} />
               <Radar
                 dataKey="value"
+                name={t("掌握度")}
                 fill="#2563eb"
                 fillOpacity={0.22}
                 stroke="#2563eb"
                 strokeWidth={3}
                 isAnimationActive={false}
               />
-              <Tooltip />
+              <Tooltip labelFormatter={(label) => t(String(label))} />
             </RadarChart>
           </ResponsiveContainer>
         </div>
       </section>
 
       <section className="panel heatmap-panel">
-        <PanelHeader icon={Target} title="题型热力图" action="正确率 %" />
+        <PanelHeader icon={Target} title={t("题型热力图")} action={t("正确率 %")} />
         <div className="heatmap">
           <div className="heatmap-row header">
             <span />
             {heatmapColumns.map((column) => (
-              <b key={column}>{column}</b>
+              <b key={column}>{t(column)}</b>
             ))}
           </div>
           {heatmap.map((row) => (
             <div className="heatmap-row" key={row.row}>
-              <strong>{row.row}</strong>
+              <strong>{t(row.row)}</strong>
               {row.values.map((value, index) => (
                 <span
                   className="heat-cell"
@@ -1965,7 +1955,7 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
                     color: value < 55 ? "#991b1b" : value < 65 ? "#9a3412" : value < 75 ? "#1e40af" : "#166534",
                   }}
                 >
-                  {value}
+                  {t(value)}
                 </span>
               ))}
             </div>
@@ -1974,9 +1964,9 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
       </section>
 
       <section className="panel mastery-panel full">
-        <PanelHeader icon={Users} title="学生 × 能力掌握矩阵" action="从班级结论下钻到个人证据" />
+        <PanelHeader icon={Users} title={t("学生 × 能力掌握矩阵")} action={t("从班级结论下钻到个人证据")} />
         <div className="mastery-toolbar">
-          <div className="mastery-segments" aria-label="掌握矩阵筛选">
+          <div className="mastery-segments" aria-label={t("掌握矩阵筛选")}>
             {[
               ["all", "全部学生"],
               ["attention", "需关注"],
@@ -1988,30 +1978,30 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
                 onClick={() => handleMasteryFilter(id as "all" | "attention" | "stable")}
                 type="button"
               >
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
-          <div className="mastery-legend" aria-label="掌握度图例">
-            <span><i className="risk" />不足 60</span>
+          <div className="mastery-legend" aria-label={t("掌握度图例")}>
+            <span><i className="risk" />{t("不足 60")}</span>
             <span><i className="watch" />60-69</span>
-            <span><i className="good" />70 以上</span>
+            <span><i className="good" />{t("70 以上")}</span>
           </div>
         </div>
         <div className="mastery-layout">
           <div className="mastery-table-scroll">
-            <div className="mastery-table" role="table" aria-label="学生能力掌握度">
+            <div className="mastery-table" role="table" aria-label={t("学生能力掌握度")}>
               <div className="mastery-row mastery-head" role="row">
-                <span role="columnheader">学生 / 风险</span>
+                <span role="columnheader">{t("学生 / 风险")}</span>
                 {masteryMatrixSkills.map((skill) => (
-                  <strong key={skill} role="columnheader">{skill}</strong>
+                  <strong key={skill} role="columnheader">{t(skill)}</strong>
                 ))}
               </div>
               {filteredMasteryRows.map((row) => (
                 <div className="mastery-row" key={row.student} role="row">
                   <div className="mastery-student" role="rowheader">
-                    <strong>{row.student}</strong>
-                    <span>{row.risk} · {row.change}</span>
+                    <strong>{t(row.student)}</strong>
+                    <span>{t(row.risk)} · {t(row.change)}</span>
                   </div>
                   {masteryMatrixSkills.map((skill) => {
                     const score = row.values[skill];
@@ -2019,7 +2009,7 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
                     const selected = selectedMasteryStudent === row.student && selectedMasterySkill === skill;
                     return (
                       <button
-                        aria-label={`${row.student} ${skill} 掌握度 ${score}%`}
+                        aria-label={t("{0} {1} 掌握度 {2}%", [row.student, skill, score])}
                         aria-pressed={selected}
                         className={`mastery-cell ${tone}${selected ? " selected" : ""}`}
                         key={skill}
@@ -2029,7 +2019,7 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
                         }}
                         type="button"
                       >
-                        {score}
+                        {t(score)}
                       </button>
                     );
                   })}
@@ -2038,25 +2028,25 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
             </div>
           </div>
           <aside className="mastery-inspector" aria-live="polite">
-            <span>当前定位</span>
-            <h3>{selectedMasteryRow.student} · {selectedMasterySkill}</h3>
+            <span>{t("当前定位")}</span>
+            <h3>{t(selectedMasteryRow.student)} · {t(selectedMasterySkill)}</h3>
             <div className="mastery-score-line">
-              <strong>{selectedMasteryScore}%</strong>
-              <small>{selectedMasteryRow.risk} · 六周变化 {selectedMasteryRow.change}</small>
+              <strong>{t(selectedMasteryScore)}%</strong>
+              <small>{t(selectedMasteryRow.risk)}{t(" · 六周变化 ")}{t(selectedMasteryRow.change)}</small>
             </div>
-            <p>{selectedMasteryRow.summary}</p>
+            <p>{t(selectedMasteryRow.summary)}</p>
             <dl>
               <div>
-                <dt>证据核对</dt>
-                <dd>{selectedMasteryAction.evidence}</dd>
+                <dt>{t("证据核对")}</dt>
+                <dd>{t(selectedMasteryAction.evidence)}</dd>
               </div>
               <div>
-                <dt>建议任务</dt>
-                <dd>{selectedMasteryAction.task}</dd>
+                <dt>{t("建议任务")}</dt>
+                <dd>{t(selectedMasteryAction.task)}</dd>
               </div>
               <div>
-                <dt>教考衔接</dt>
-                <dd>{selectedMasteryAction.examLink}</dd>
+                <dt>{t("教考衔接")}</dt>
+                <dd>{t(selectedMasteryAction.examLink)}</dd>
               </div>
             </dl>
             <button
@@ -2066,90 +2056,88 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
               type="button"
             >
               <Send size={15} />
-              {assignedMasteryTasks.includes(selectedMasteryKey) ? "已加入跟进清单" : "加入跟进清单"}
+              {t(assignedMasteryTasks.includes(selectedMasteryKey) ? "已加入跟进清单" : "加入跟进清单")}
             </button>
           </aside>
         </div>
       </section>
 
       <section className="panel knowledge-panel full">
-        <PanelHeader icon={Brain} title="英语知识与能力图谱" action="能力点 -> 错因 -> 任务" />
+        <PanelHeader icon={Brain} title={t("英语知识与能力图谱")} action={t("能力点 -> 错因 -> 任务")} />
         <div className="knowledge-map">
           {knowledgeGraphNodes.map((node) => (
             <article className="knowledge-node" key={node.skill}>
               <div>
-                <span>{node.skill}</span>
-                <strong>{node.mastery}%</strong>
+                <span>{t(node.skill)}</span>
+                <strong>{t(node.mastery)}%</strong>
               </div>
               <Progress value={node.mastery} />
-              <p>{node.evidence}</p>
-              <small>{node.linkedTask}</small>
+              <p>{t(node.evidence)}</p>
+              <small>{t(node.linkedTask)}</small>
             </article>
           ))}
         </div>
       </section>
 
       <section className="panel repeated-error-panel full">
-        <PanelHeader icon={RefreshCw} title="重复错因追踪" action="跨周复现 -> 干预 -> 再测" />
+        <PanelHeader icon={RefreshCw} title={t("重复错因追踪")} action={t("跨周复现 -> 干预 -> 再测")} />
         <div className="repeat-track-grid">
           {repeatedErrorTracks.map((item) => (
             <article className={`repeat-track-card ${item.retest === "未达标" ? "risk" : item.retest === "进行中" ? "active" : "done"}`} key={item.skill}>
               <div>
-                <span>{item.weeks}</span>
-                <strong>{item.skill}</strong>
-                <b>{item.students}人</b>
+                <span>{t(item.weeks)}</span>
+                <strong>{t(item.skill)}</strong>
+                <b>{t("{0}人", [item.students])}</b>
               </div>
-              <p>{item.evidence}</p>
-              <small>{item.intervention}</small>
-              <em>{item.retest}</em>
+              <p>{t(item.evidence)}</p>
+              <small>{t(item.intervention)}</small>
+              <em>{t(item.retest)}</em>
             </article>
           ))}
         </div>
       </section>
 
       <section className="panel chart-panel wide">
-        <PanelHeader icon={BarChart3} title="班级横向对比" action="正确率 / 完成率 / 写作达成率 %" />
-        <div className="chart-takeaway">
-          高二(7)班整体落后约 5 个百分点且需跟进人数最多，建议备课组优先共享高二(3)班的讲评课设计。
-        </div>
+        <PanelHeader icon={BarChart3} title={t("班级横向对比")} action={t("正确率 / 完成率 / 写作达成率 %")} />
+        <div className="chart-takeaway">{t("高二(7)班整体落后约 5 个百分点且需跟进人数最多，建议备课组优先共享高二(3)班的讲评课设计。")}</div>
         <div className="chart-frame">
           <ResponsiveContainer height={260} width="100%" initialDimension={{ width: 320, height: 260 }}>
             <BarChart data={classCompareData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
               <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} tickFormatter={(value) => chartLabel(value, locale)} interval={0} tick={{ fontSize: 11 }} />
               <YAxis tickLine={false} axisLine={false} domain={[0, 100]} />
-              <Tooltip />
+              <Tooltip labelFormatter={(label) => t(String(label))} />
               <Legend />
-              <Bar dataKey="平均正确率" fill="#2563eb" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="完成率" fill="#16a34a" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="写作达成" fill="#f97316" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="平均正确率" fill="#2563eb" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("平均正确率")} />
+              <Bar dataKey="完成率" fill="#16a34a" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("完成率")} />
+              <Bar dataKey="写作达成" fill="#f97316" radius={[4, 4, 0, 0]} isAnimationActive={false} name={t("写作达成")} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </section>
 
       <section className="panel warning-panel">
-        <PanelHeader icon={AlertTriangle} title="学生预警中心" action="点击状态可流转：未处理→已安排→已复盘" />
+        <PanelHeader icon={AlertTriangle} title={t("学生预警中心")} action={t("点击状态可流转：未处理→已安排→已复盘")} />
         <div className="warning-list">
           {warningCases.map((item) => {
             const status = warningStatusMap[item.student] ?? item.status;
             return (
               <article className={`warning-card level-${item.level}`} key={item.student}>
                 <div className="warning-head">
-                  <strong>{item.student}</strong>
-                  <span>{item.level}风险</span>
+                  <strong>{t(item.student)}</strong>
+                  <span>{t("{0}风险", [item.level])}</span>
                 </div>
-                <p>{item.reason}</p>
-                <small>{item.action}</small>
+                <p>{t(item.reason)}</p>
+                <small>{t(item.action)}</small>
                 <div className="warning-foot">
-                  <b>{item.owner}</b>
+                  <b>{t(item.owner)}</b>
                   <button
                     className={`warning-status-chip status-${warningStatusFlow.indexOf(status)}`}
                     onClick={() => cycleWarningStatus(item.student)}
-                    title="点击切换处理状态"
+                    title={t("点击切换处理状态")}
                     type="button"
                   >
-                    {status}
+                    {t(status)}
                   </button>
                 </div>
               </article>
@@ -2159,8 +2147,8 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
       </section>
 
       <section className="panel lesson-plan-panel">
-        <PanelHeader icon={ClipboardCheck} title="讲评课备课单" action="课前-课中-课后闭环" />
-        {analyticsCopyError && <p role="status">{analyticsCopyError}</p>}
+        <PanelHeader icon={ClipboardCheck} title={t("讲评课备课单")} action={t("课前-课中-课后闭环")} />
+        {analyticsCopyError && <p role="status">{t(analyticsCopyError)}</p>}
         <div className="panel-inline-actions">
           <button
             className="secondary-button"
@@ -2168,49 +2156,47 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
             type="button"
           >
             <ClipboardCheck size={16} />
-            {copiedAnalyticsText === "lesson" ? "已复制备课单" : "复制备课单"}
+            {t(copiedAnalyticsText === `lesson:${locale}` ? "已复制备课单" : "复制备课单")}
           </button>
           <button
             className="secondary-button"
-            onClick={() => downloadTextFile(lessonPlanText, "讲评课备课单.md", "text/markdown;charset=utf-8")}
+            onClick={() => downloadTextFile(lessonPlanText, t("讲评课备课单.md"), "text/markdown;charset=utf-8")}
             type="button"
           >
-            <Download size={16} />
-            导出教案大纲
-          </button>
+            <Download size={16} />{t("导出教案大纲")}</button>
         </div>
         <div className="lesson-brief">
           {reviewLessonPlan.map((item) => (
             <article key={item.phase}>
-              <span>{item.phase}</span>
-              <strong>{item.title}</strong>
-              <p>{item.output}</p>
+              <span>{t(item.phase)}</span>
+              <strong>{t(item.title)}</strong>
+              <p>{t(item.output)}</p>
             </article>
           ))}
         </div>
       </section>
 
       <section className="panel chart-panel wide">
-        <PanelHeader icon={LineChart} title="分项正确率趋势" action="阅读 / 写作 / 听说" />
+        <PanelHeader icon={LineChart} title={t("分项正确率趋势")} action={t("阅读 / 写作 / 听说")} />
         <div className="chart-frame">
           <ResponsiveContainer height={240} width="100%" initialDimension={{ width: 320, height: 240 }}>
             <ReLineChart data={accuracyTrend} margin={{ top: 10, right: 22, left: -20, bottom: 0 }}>
               <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
-              <XAxis dataKey="week" tickLine={false} axisLine={false} />
+              <XAxis dataKey="week" tickLine={false} axisLine={false} tickFormatter={(value) => t(String(value))} />
               <YAxis tickLine={false} axisLine={false} domain={[40, 90]} />
-              <Tooltip />
+              <Tooltip labelFormatter={(label) => t(String(label))} />
               <Legend />
-              <Line dataKey="阅读" stroke="#2563eb" strokeWidth={3} type="monotone" isAnimationActive={false} />
-              <Line dataKey="写作" stroke="#f97316" strokeWidth={3} type="monotone" isAnimationActive={false} />
-              <Line dataKey="听说" stroke="#16a34a" strokeWidth={3} type="monotone" isAnimationActive={false} />
+              <Line dataKey="阅读" stroke="#2563eb" strokeWidth={3} type="monotone" isAnimationActive={false} name={t("阅读")} />
+              <Line dataKey="写作" stroke="#f97316" strokeWidth={3} type="monotone" isAnimationActive={false} name={t("写作")} />
+              <Line dataKey="听说" stroke="#16a34a" strokeWidth={3} type="monotone" isAnimationActive={false} name={t("听说")} />
             </ReLineChart>
           </ResponsiveContainer>
         </div>
       </section>
 
       <section className="panel report-preview-panel full">
-        <PanelHeader icon={Download} title="周报与家校沟通预览" action="可复制 · 可导出" />
-        {analyticsCopyError && <p role="status">{analyticsCopyError}</p>}
+        <PanelHeader icon={Download} title={t("周报与家校沟通预览")} action={t("可复制 · 可导出")} />
+        {analyticsCopyError && <p role="status">{t(analyticsCopyError)}</p>}
         <div className="panel-inline-actions">
           <button
             className="secondary-button"
@@ -2218,23 +2204,21 @@ function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTask
             type="button"
           >
             <ClipboardCheck size={16} />
-            {copiedAnalyticsText === "weekly" ? "已复制摘要" : "复制三版摘要"}
+            {t(copiedAnalyticsText === `weekly:${locale}` ? "已复制摘要" : "复制三版摘要")}
           </button>
           <button
             className="secondary-button"
-            onClick={() => downloadTextFile(weeklyPreviewText, "周报摘要.md", "text/markdown;charset=utf-8")}
+            onClick={() => downloadTextFile(weeklyPreviewText, t("周报摘要.md"), "text/markdown;charset=utf-8")}
             type="button"
           >
-            <Download size={16} />
-            下载摘要
-          </button>
+            <Download size={16} />{t("下载摘要")}</button>
         </div>
         <div className="report-preview-grid">
           {reportPreviewItems.map((item) => (
             <article key={item.audience}>
-              <span>{item.audience}</span>
-              <strong>{item.title}</strong>
-              <p>{item.detail}</p>
+              <span>{t(item.audience)}</span>
+              <strong>{t(item.title)}</strong>
+              <p>{t(item.detail)}</p>
             </article>
           ))}
         </div>
@@ -2262,16 +2246,17 @@ function ReportsPanel({
   setCopiedReport: (value: string) => void;
   setSelectedReportId: (value: string) => void;
 }) {
+  const { t, locale } = useLocale();
   const selectedReport =
     reportTemplates.find((item) => item.id === selectedReportId) ?? reportTemplates[0];
   const [editing, setEditing] = useState(false);
   const [copyError, setCopyError] = useState("");
   const toneOptions: ReportTone[] = ["正式", "简洁", "鼓励"];
   const variant = selectedReport.tones[selectedTone];
-  const draftKey = `${selectedReport.id}:${selectedTone}`;
-  const defaultBody = `${variant.body}\n\n${variant.bullets.map((item) => `- ${item}`).join("\n")}`;
+  const draftKey = `${selectedReport.id}:${selectedTone}:${locale}`;
+  const defaultBody = `${t(variant.body)}\n\n${variant.bullets.map((item) => `- ${t(item)}`).join("\n")}`;
   const draft = drafts[draftKey] ?? defaultBody;
-  const reportText = `${selectedReport.title}（${selectedReport.audience} · ${selectedTone}语气）\n\n${draft}`;
+  const reportText = `${t("{0}（{1} · {2}语气）", [selectedReport.title, selectedReport.audience, selectedTone])}\n\n${draft}`;
 
   const handleCopy = async () => {
     try {
@@ -2291,7 +2276,7 @@ function ReportsPanel({
   const handleDownload = () => {
     downloadTextFile(
       `# ${reportText}`,
-      `${selectedReport.audience}-${selectedTone}.md`,
+      `${t(selectedReport.audience)}-${t(selectedTone)}.md`,
       "text/markdown;charset=utf-8",
     );
   };
@@ -2309,7 +2294,7 @@ function ReportsPanel({
   return (
     <div className="reports-layout">
       <section className="panel report-switch-panel">
-        <PanelHeader icon={FileText} title="报告类型" action="一键生成 · 老师可编辑" />
+        <PanelHeader icon={FileText} title={t("报告类型")} action={t("一键生成 · 老师可编辑")} />
         <div className="report-type-list">
           {reportTemplates.map((item) => (
             <button
@@ -2318,37 +2303,33 @@ function ReportsPanel({
               onClick={() => handleSelectReport(item.id)}
               type="button"
             >
-              <span>{item.audience}</span>
-              <strong>{item.title}</strong>
-              <small>默认{item.tone}语气 · 可切换</small>
+              <span>{t(item.audience)}</span>
+              <strong>{t(item.title)}</strong>
+              <small>{t("默认 {0}语气 · 可切换", [item.tone])}</small>
             </button>
           ))}
         </div>
         <div className="privacy-note">
           <ShieldCheck size={16} />
-          <span>家长版默认隐藏班级排名，只展示进步、风险和下一步任务。</span>
+          <span>{t("家长版默认隐藏班级排名，只展示进步、风险和下一步任务。")}</span>
         </div>
       </section>
 
       <section className="panel report-editor-panel">
-        <PanelHeader icon={MessageSquareText} title={selectedReport.title} action={`${selectedReport.audience} · ${selectedTone}语气`} />
+        <PanelHeader icon={MessageSquareText} title={t(selectedReport.title)} action={t("{0} · {1}语气", [selectedReport.audience, selectedTone])} />
         <div className="report-toolbar">
           <button className="primary-button" onClick={handleCopy} type="button">
             <ClipboardCheck size={16} />
-            {copiedReport === reportText ? "已复制" : "复制报告"}
+            {t(copiedReport === reportText ? "已复制" : "复制报告")}
           </button>
           <button className="secondary-button" onClick={handleDownload} type="button">
-            <Download size={16} />
-            下载 Markdown
-          </button>
+            <Download size={16} />{t("下载 Markdown")}</button>
           <button className="secondary-button" onClick={handlePrint} type="button">
-            <Printer size={16} />
-            打印 / 存 PDF
-          </button>
+            <Printer size={16} />{t("打印 / 存 PDF")}</button>
           <button className="secondary-button" type="button" aria-pressed={editing} onClick={() => setEditing(!editing)}>
-            <PencilLine size={16} aria-hidden="true" />{editing ? "完成编辑" : "编辑报告"}
+            <PencilLine size={16} aria-hidden="true" />{t(editing ? "完成编辑" : "编辑报告")}
           </button>
-          <div className="tone-switch" role="group" aria-label="改写语气">
+          <div className="tone-switch" role="group" aria-label={t("改写语气")}>
             <Sparkles size={14} />
             {toneOptions.map((tone) => (
               <button
@@ -2358,21 +2339,21 @@ function ReportsPanel({
                 aria-pressed={selectedTone === tone}
                 type="button"
               >
-                {tone}
+                {t(tone)}
               </button>
             ))}
           </div>
         </div>
-        {copyError && <p role="status">{copyError}</p>}
+        {copyError && <p role="status">{t(copyError)}</p>}
         <article className="report-document">
-          <span>{drafts[draftKey] !== undefined ? "教师修改稿" : "示例报告"} · {selectedTone}语气 · 当前页面暂存</span>
-          <h2>{selectedReport.title}</h2>
-          {editing ? <textarea className="report-draft-input" aria-label="报告正文" maxLength={12000} value={draft} onChange={(event) => onDraftChange(draftKey, event.target.value)} /> : <p className="report-draft-preview">{draft}</p>}
+          <span>{t(drafts[draftKey] !== undefined ? "教师修改稿" : "示例报告")} · {t("{0}语气 · 当前页面暂存", [selectedTone])}</span>
+          <h2>{t(selectedReport.title)}</h2>
+          {editing ? <textarea className="report-draft-input" aria-label={t("报告正文")} maxLength={12000} value={draft} onChange={(event) => onDraftChange(draftKey, event.target.value)} /> : <p className="report-draft-preview">{draft}</p>}
         </article>
       </section>
 
       <section className="panel report-delivery-panel">
-        <PanelHeader icon={Send} title="发送前检查" action="备课组 / 学生 / 家长" />
+        <PanelHeader icon={Send} title={t("发送前检查")} action={t("备课组 / 学生 / 家长")} />
         <div className="delivery-checks">
           {[
             ["数据口径", "已使用模拟周测与错因数据"],
@@ -2381,17 +2362,17 @@ function ReportsPanel({
           ].map(([title, detail]) => (
             <div key={title}>
               <CircleCheck size={16} />
-              <strong>{title}</strong>
-              <span>{detail}</span>
+              <strong>{t(title)}</strong>
+              <span>{t(detail)}</span>
             </div>
           ))}
         </div>
         <div className="report-preview-grid compact">
           {reportPreviewItems.map((item) => (
             <article key={item.audience}>
-              <span>{item.audience}</span>
-              <strong>{item.title}</strong>
-              <p>{item.detail}</p>
+              <span>{t(item.audience)}</span>
+              <strong>{t(item.title)}</strong>
+              <p>{t(item.detail)}</p>
             </article>
           ))}
         </div>
@@ -2427,13 +2408,14 @@ function ImaAssistantPanel({
   setDeepSeekApiKey: (value: string) => void;
   setDeepSeekModel: (value: string) => void;
 }) {
-  const learningSummary = buildImaLearningSummary({
+  const { t } = useLocale();
+  const learningSummary = t(buildImaLearningSummary({
     className: selectedClass,
     classSnapshot,
     liveSummary,
     question,
-  });
-  const knowledgePrompt = buildImaKnowledgePrompt();
+  }));
+  const knowledgePrompt = t(buildImaKnowledgePrompt());
   const [imaCopyError, setImaCopyError] = useState("");
 
   const handleCopy = async (_kind: "summary" | "knowledge", text: string) => {
@@ -2483,25 +2465,19 @@ function ImaAssistantPanel({
       <section className="panel ima-hero-panel">
         <div className="ima-hero-copy">
           <span className="hero-kicker">
-            <Brain size={16} />
-            知识库桥接 · 不替代学情数据库
-          </span>
-          <h2>把结构化学情结果带到ima里，用校本知识生成备课建议</h2>
-          <p>
-            学情平台负责本地解析、统计和跟踪；DeepSeek 可按匿名摘要生成讲评建议和同类练习；ima 适合承载课标、教材、试卷讲评和教研记录。
-          </p>
+            <Brain size={16} />{t("知识库桥接 · 不替代学情数据库")}</span>
+          <h2>{t("把结构化学情结果带到ima里，用校本知识生成备课建议")}</h2>
+          <p>{t("学情平台负责本地解析、统计和跟踪；DeepSeek 可按匿名摘要生成讲评建议和同类练习；ima 适合承载课标、教材、试卷讲评和教研记录。")}</p>
           <div className="hero-actions">
             <a className="primary-button ima-open-link" href="https://ima.qq.com/" rel="noreferrer" target="_blank">
-              <ExternalLink size={16} />
-              打开 ima
-            </a>
+              <ExternalLink size={16} />{t("打开 ima")}</a>
             <button
               className="secondary-button"
               onClick={() => handleCopy("summary", learningSummary)}
               type="button"
             >
               <ClipboardCheck size={16} />
-              {copiedImaText === learningSummary ? "已复制学情摘要" : "复制学情摘要"}
+              {t(copiedImaText === learningSummary ? "已复制学情摘要" : "复制学情摘要")}
             </button>
             <button
               className="secondary-button"
@@ -2509,20 +2485,20 @@ function ImaAssistantPanel({
               type="button"
             >
               <Sparkles size={16} />
-              {copiedImaText === knowledgePrompt ? "已复制提示词" : "复制知识库提示词"}
+              {t(copiedImaText === knowledgePrompt ? "已复制提示词" : "复制知识库提示词")}
             </button>
           </div>
         </div>
         <div className="ima-privacy-card">
-          {imaCopyError && <p role="status">{imaCopyError}</p>}
+          {imaCopyError && <p role="status">{t(imaCopyError)}</p>}
           <ShieldCheck size={22} />
-          <strong>API边界</strong>
-          <p>DeepSeek Key 只保存在当前页面内存；点击生成时才会把匿名学情摘要发送到 DeepSeek。未填 Key 时自动使用本地演示结果。</p>
+          <strong>{t("API边界")}</strong>
+          <p>{t("DeepSeek Key 只保存在当前页面内存；点击生成时才会把匿名学情摘要发送到 DeepSeek。未填 Key 时自动使用本地演示结果。")}</p>
         </div>
       </section>
 
       <section className="panel deepseek-panel">
-        <PanelHeader icon={Sparkles} title="DeepSeek API 接入" action="可选 · 演示时临时填写" />
+        <PanelHeader icon={Sparkles} title={t("DeepSeek API 接入")} action={t("可选 · 演示时临时填写")} />
         <div className="deepseek-grid">
           <div className="deepseek-settings">
             <label>
@@ -2531,16 +2507,16 @@ function ImaAssistantPanel({
                 autoComplete="new-password"
                 maxLength={512}
                 onChange={(event) => setDeepSeekApiKey(event.target.value)}
-                placeholder="sk-... 仅在当前页面临时使用"
+                placeholder={t("sk-... 仅在当前页面临时使用")}
                 spellCheck={false}
                 type="password"
                 value={deepSeekApiKey}
               />
             </label>
             <label>
-              <span>模型</span>
+              <span>{t("模型")}</span>
               <select value={deepSeekModel} onChange={(event) => setDeepSeekModel(event.target.value)}>
-                <option value="deepseek-v4-flash">deepseek-v4-flash（推荐演示）</option>
+                <option value="deepseek-v4-flash">{t("deepseek-v4-flash（推荐演示）")}</option>
                 <option value="deepseek-v4-pro">deepseek-v4-pro</option>
               </select>
             </label>
@@ -2551,55 +2527,43 @@ function ImaAssistantPanel({
                 onClick={() => onDeepSeekGenerate("test")}
                 type="button"
               >
-                <CircleCheck size={16} />
-                测试连接
-              </button>
+                <CircleCheck size={16} />{t("测试连接")}</button>
               <button
                 className="primary-button"
                 disabled={deepSeekState.status === "loading"}
                 onClick={() => onDeepSeekGenerate("teaching")}
                 type="button"
               >
-                <Sparkles size={16} />
-                生成教学建议
-              </button>
+                <Sparkles size={16} />{t("生成教学建议")}</button>
               <button
                 className="secondary-button"
                 disabled={deepSeekState.status === "loading"}
                 onClick={() => onDeepSeekGenerate("practice")}
                 type="button"
               >
-                <BookOpenCheck size={16} />
-                生成同类题
-              </button>
+                <BookOpenCheck size={16} />{t("生成同类题")}</button>
               <button
                 className="secondary-button"
                 disabled={deepSeekState.status === "loading"}
                 onClick={() => onDeepSeekGenerate("report")}
                 type="button"
               >
-                <FileText size={16} />
-                生成汇报话术
-              </button>
+                <FileText size={16} />{t("生成汇报话术")}</button>
             </div>
-            <p className="deepseek-note">
-              浏览器直连只适合 demo，请使用单独的低额度临时 Key；正式产品应改为学校服务器代理，并加入权限、审计和脱敏策略。
-            </p>
+            <p className="deepseek-note">{t("浏览器直连只适合 demo，请使用单独的低额度临时 Key；正式产品应改为学校服务器代理，并加入权限、审计和脱敏策略。")}</p>
           </div>
           <div className={`deepseek-output ${deepSeekState.status}`}>
-            <span>{deepSeekState.message}</span>
-            <pre>{deepSeekState.result || "这里会显示 DeepSeek 返回内容；没有 API Key 时会展示本地回退建议。"}</pre>
+            <span>{t(deepSeekState.message)}</span>
+            <pre>{deepSeekState.status === "success" ? deepSeekState.result : t(deepSeekState.result || "这里会显示 DeepSeek 返回内容；没有 API Key 时会展示本地回退建议。")}</pre>
             <button
               className="secondary-button"
               disabled={!deepSeekState.result}
               onClick={() => {
-                void navigator.clipboard?.writeText(deepSeekState.result);
+                void navigator.clipboard?.writeText(deepSeekState.status === "success" ? deepSeekState.result : t(deepSeekState.result));
               }}
               type="button"
             >
-              <ClipboardCheck size={16} />
-              复制结果
-            </button>
+              <ClipboardCheck size={16} />{t("复制结果")}</button>
           </div>
         </div>
       </section>
@@ -2607,49 +2571,49 @@ function ImaAssistantPanel({
       <section className="ima-workflow-grid">
         {workflowSteps.map(([title, detail], index) => (
           <article className="panel ima-step-card" key={title}>
-            <span>{String(index + 1).padStart(2, "0")}</span>
-            <strong>{title}</strong>
-            <p>{detail}</p>
+            <span>{t(String(index + 1).padStart(2, "0"))}</span>
+            <strong>{t(title)}</strong>
+            <p>{t(detail)}</p>
           </article>
         ))}
       </section>
 
       <section className="panel ima-current-context">
-        <PanelHeader icon={ClipboardCheck} title="即将复制给ima的匿名摘要" action={`${selectedClass} · Q${question.number}`} />
+        <PanelHeader icon={ClipboardCheck} title={t("即将复制给ima的匿名摘要")} action={t("{0} · Q{1}", [selectedClass, question.number])} />
         <div className="ima-context-grid">
           <div>
-            <span>班级概况</span>
-            <strong>{percent(classSnapshot.averageAccuracy)}</strong>
-            <small>平均正确率 · {classSnapshot.riskStudents}人需跟进</small>
+            <span>{t("班级概况")}</span>
+            <strong>{t(percent(classSnapshot.averageAccuracy))}</strong>
+            <small>{t("平均正确率")} · {t("{0}人需跟进", [classSnapshot.riskStudents])}</small>
           </div>
           <div>
-            <span>重点错题</span>
-            <strong>Q{question.number} {question.questionType}</strong>
-            <small>{question.diagnosis.causes.join(" / ")}</small>
+            <span>{t("重点错题")}</span>
+            <strong>Q{t(question.number)} {t(question.questionType)}</strong>
+            <small>{t(question.diagnosis.causes.join(" / "))}</small>
           </div>
           <div>
-            <span>本地解析</span>
-            <strong>{liveSummary ? `${liveSummary.rowCount}人` : "未导入"}</strong>
-            <small>{liveSummary ? `平均达成率 ${percent(liveSummary.averageRate)}` : "导入后会补充班级摘要"}</small>
+            <span>{t("本地解析")}</span>
+            <strong>{t(liveSummary ? `${liveSummary.rowCount}人` : "未导入")}</strong>
+            <small>{t(liveSummary ? `平均达成率 ${percent(liveSummary.averageRate)}` : "导入后会补充班级摘要")}</small>
           </div>
         </div>
       </section>
 
       <section className="panel ima-resource-panel">
-        <PanelHeader icon={BookMarked} title="建议放进ima的资料" action="资料库，不是学生数据库" />
+        <PanelHeader icon={BookMarked} title={t("建议放进ima的资料")} action={t("资料库，不是学生数据库")} />
         <div className="ima-resource-grid">
           {knowledgeCards.map((item) => (
             <article className="ima-resource-card" key={item.title}>
-              <span>{item.tag}</span>
-              <strong>{item.title}</strong>
-              <p>{item.detail}</p>
+              <span>{t(item.tag)}</span>
+              <strong>{t(item.title)}</strong>
+              <p>{t(item.detail)}</p>
             </article>
           ))}
         </div>
       </section>
 
       <section className="panel ima-boundary-panel">
-        <PanelHeader icon={ShieldCheck} title="v1接入边界" action="外部工作台链接" />
+        <PanelHeader icon={ShieldCheck} title={t("v1接入边界")} action={t("外部工作台链接")} />
         <div className="delivery-checks">
           {[
             ["不嵌入", "不把ima嵌到iframe里，避免登录和权限问题。"],
@@ -2658,8 +2622,8 @@ function ImaAssistantPanel({
           ].map(([title, detail]) => (
             <div key={title}>
               <CircleCheck size={16} />
-              <strong>{title}</strong>
-              <span>{detail}</span>
+              <strong>{t(title)}</strong>
+              <span>{t(detail)}</span>
             </div>
           ))}
         </div>
@@ -2677,52 +2641,51 @@ function PracticePanel({
   question: QuestionItem;
   onGeneratePractice: () => void;
 }) {
+  const { t } = useLocale();
   const items = generated.length ? generated : question.diagnosis.practiceItems;
 
   return (
     <div className="practice-layout">
       <section className="panel practice-hero">
-        <PanelHeader icon={BookMarked} title="拓展练习包" action={`基于 Q${question.number} ${question.questionType}`} />
+        <PanelHeader icon={BookMarked} title={t("拓展练习包")} action={t("基于 Q{0} {1}", [question.number, question.questionType])} />
         <div className="practice-summary">
           <div>
-            <span>目标题型</span>
-            <strong>{question.questionType}</strong>
+            <span>{t("目标题型")}</span>
+            <strong>{t(question.questionType)}</strong>
           </div>
           <div>
-            <span>错因聚焦</span>
-            <strong>{question.diagnosis.causes.slice(0, 2).join(" / ")}</strong>
+            <span>{t("错因聚焦")}</span>
+            <strong>{t(question.diagnosis.causes.slice(0, 2).join(" / "))}</strong>
           </div>
           <div>
-            <span>练习数量</span>
-            <strong>{items.length} 题</strong>
+            <span>{t("练习数量")}</span>
+            <strong>{t(items.length)}{t(" 题")}</strong>
           </div>
         </div>
         <button className="primary-button" onClick={onGeneratePractice} type="button">
-          <Sparkles size={16} />
-          重新生成
-        </button>
+          <Sparkles size={16} />{t("重新生成")}</button>
       </section>
 
       <section className="practice-list">
         {items.map((item) => (
           <article className="panel practice-card" key={item.id}>
             <div className="practice-card-head">
-              <span className="difficulty">{item.difficulty}</span>
-              <span>{item.targetSkill}</span>
+              <span className="difficulty">{t(item.difficulty)}</span>
+              <span>{t(item.targetSkill)}</span>
             </div>
-            <h2>{item.title}</h2>
-            <p>{item.prompt}</p>
+            <h2>{t(item.title)}</h2>
+            <p>{t(item.prompt)}</p>
             {item.choices && (
               <div className="choice-grid">
                 {item.choices.map((choice) => (
-                  <span key={choice}>{choice}</span>
+                  <span key={choice}>{t(choice)}</span>
                 ))}
               </div>
             )}
             <div className="answer-line">
               <CircleCheck size={16} />
-              <strong>答案 {item.answer}</strong>
-              <span>{item.explanation}</span>
+              <strong>{t("答案 ")}{t(item.answer)}</strong>
+              <span>{t(item.explanation)}</span>
             </div>
           </article>
         ))}
@@ -2750,6 +2713,7 @@ function StudentPanel({
   wrongAttempts: StudentAttempt[];
   questions: QuestionItem[];
 }) {
+  const { t } = useLocale();
   const averageMastery = attempts.length
     ? Math.round(attempts.reduce((sum, attempt) => sum + attempt.mastery, 0) / attempts.length)
     : 0;
@@ -2784,25 +2748,25 @@ function StudentPanel({
     const entries = wrongAttempts.map((attempt) => {
       const question = questions.find((item) => item.id === attempt.questionId) ?? questions[0];
       return [
-        `## Q${question.number} ${question.questionType}（${question.title}）`,
-        `- 我的答案：${attempt.selected}　参考答案：${question.answer}`,
-        `- 错因：${attempt.cause}`,
-        `- 讲解：${question.diagnosis.narrative}`,
-        `- 建议：${question.diagnosis.teachingInsight.suggestion}`,
+        `## Q${question.number} ${t(question.questionType)} (${question.title})`,
+        t("- 我的答案：{0}　参考答案：{1}", [attempt.selected, question.answer]),
+        t("- 错因：{0}", [attempt.cause]),
+        t("- 讲解：{0}", [question.diagnosis.narrative]),
+        t("- 建议：{0}", [question.diagnosis.teachingInsight.suggestion]),
       ].join("\n");
     });
     return [
-      `# ${selectedStudent?.studentName ?? "匿名学生"} 个人错题本`,
-      `掌握度：${averageMastery}%　跟踪等级：${profile.riskLevel}　下次复盘：${profile.nextReview}`,
+      t("# {0} 个人错题本", [selectedStudent?.studentName ?? "匿名学生"]),
+      t("掌握度：{0}%　跟踪等级：{1}　下次复盘：{2}", [averageMastery, profile.riskLevel, profile.nextReview]),
       "",
-      entries.length ? entries.join("\n\n") : "本次暂无错题。",
+      entries.length ? entries.join("\n\n") : t("本次暂无错题。"),
     ].join("\n");
   };
 
   return (
     <div className="student-layout">
       <section className="panel student-selector">
-        <PanelHeader icon={UserRound} title="学生" action="匿名演示" />
+        <PanelHeader icon={UserRound} title={t("学生")} action={t("匿名演示")} />
         <div className="student-list">
           {students.map((student) => (
             <button
@@ -2811,8 +2775,8 @@ function StudentPanel({
               onClick={() => setSelectedStudentId(student.studentId)}
               type="button"
             >
-              <span>{student.studentName}</span>
-              <small>{student.className}</small>
+              <span>{t(student.studentName)}</span>
+              <small>{t(student.className)}</small>
             </button>
           ))}
         </div>
@@ -2820,91 +2784,89 @@ function StudentPanel({
 
       <section className="student-main">
         <div className="metric-grid compact">
-          <MetricCard icon={Target} label="掌握度" tone="blue" value={`${averageMastery}%`} trend="个人画像" />
-          <MetricCard icon={AlertTriangle} label="错题数" tone="red" value={`${wrongAttempts.length}`} trend="需订正" />
-          <MetricCard icon={ShieldCheck} label="跟踪等级" tone={riskTone === "high" ? "red" : riskTone === "medium" ? "orange" : riskTone === "low" ? "green" : "blue"} value={profile.riskLevel} trend={profile.phase} />
+          <MetricCard icon={Target} label={t("掌握度")} tone="blue" value={t("{0}%", [averageMastery])} trend={t("个人画像")} />
+          <MetricCard icon={AlertTriangle} label={t("错题数")} tone="red" value={t("{0}", [wrongAttempts.length])} trend={t("需订正")} />
+          <MetricCard icon={ShieldCheck} label={t("跟踪等级")} tone={riskTone === "high" ? "red" : riskTone === "medium" ? "orange" : riskTone === "low" ? "green" : "blue"} value={t(profile.riskLevel)} trend={t(profile.phase)} />
         </div>
 
         <section className="panel student-profile-hero">
           <div className="student-identity">
-            <span className="profile-kicker">学生学情画像</span>
-            <h2>{selectedStudent?.studentName ?? "匿名学生"}</h2>
-            <p>{profile.summary}</p>
+            <span className="profile-kicker">{t("学生学情画像")}</span>
+            <h2>{t(selectedStudent?.studentName ?? "匿名学生")}</h2>
+            <p>{t(profile.summary)}</p>
             <div className="skill-pill-list">
               {profile.focusSkills.map((skill) => (
-                <span key={skill}>{skill}</span>
+                <span key={skill}>{t(skill)}</span>
               ))}
             </div>
             <div className="privacy-flags">
-              <span>教师可见：完整错因证据</span>
-              <span>家长版：隐藏排名与班级比较</span>
+              <span>{t("教师可见：完整错因证据")}</span>
+              <span>{t("家长版：隐藏排名与班级比较")}</span>
             </div>
           </div>
           <div className="profile-review-card">
-            <span className={`risk-badge ${riskTone}`}>{savedProfile ? `${profile.riskLevel}风险` : "待评估"}</span>
-            <strong>{profile.phase}</strong>
-            <small>下一次复盘：{profile.nextReview}</small>
+            <span className={`risk-badge ${riskTone}`}>{t(savedProfile ? `${profile.riskLevel}风险` : "待评估")}</span>
+            <strong>{t(profile.phase)}</strong>
+            <small>{t("下一次复盘：")}{t(profile.nextReview)}</small>
             <button className="ghost-button" onClick={handleGenerateFollowUp} type="button">
               <RefreshCw size={16} />
-              {followUpTasks.length ? "重新生成跟进任务" : "生成跟进任务"}
+              {t(followUpTasks.length ? "重新生成跟进任务" : "生成跟进任务")}
             </button>
           </div>
         </section>
 
         {followUpTasks.length > 0 && (
           <section className="panel follow-up-panel">
-            <PanelHeader icon={ClipboardList} title="跟进任务草稿" action="本地规则生成 · 待教师复核" />
+            <PanelHeader icon={ClipboardList} title={t("跟进任务草稿")} action={t("本地规则生成 · 待教师复核")} />
             <ol className="follow-up-list">
               {followUpTasks.map((task) => (
-                <li key={task}>{task}</li>
+                <li key={task}>{t(task)}</li>
               ))}
             </ol>
             <div className="panel-inline-actions">
               <button
                 className="secondary-button"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(followUpTasks.map((task, index) => `${index + 1}. ${task}`).join("\n"));
+                  void navigator.clipboard?.writeText(followUpTasks.map((task, index) => `${index + 1}. ${t(task)}`).join("\n"));
                 }}
                 type="button"
               >
-                <ClipboardCheck size={16} />
-                复制任务清单
-              </button>
+                <ClipboardCheck size={16} />{t("复制任务清单")}</button>
             </div>
           </section>
         )}
 
         <div className="student-progress-grid">
           <section className="panel">
-            <PanelHeader icon={LineChart} title="个人学习进度曲线" action="按周跟踪" />
+            <PanelHeader icon={LineChart} title={t("个人学习进度曲线")} action={t("按周跟踪")} />
             {profile.progressTrend.length > 0 ? <div className="chart-box student-chart">
               <ResponsiveContainer width="100%" height={250} initialDimension={{ width: 320, height: 250 }}>
                 <ReLineChart data={profile.progressTrend} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="week" tickLine={false} axisLine={false} />
+                  <XAxis dataKey="week" tickLine={false} axisLine={false} tickFormatter={(value) => t(String(value))} />
                   <YAxis domain={[40, 100]} tickLine={false} axisLine={false} />
-                  <Tooltip />
+                  <Tooltip labelFormatter={(label) => t(String(label))} />
                   <Legend />
-                  <Line type="monotone" dataKey="阅读" stroke="#2563eb" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="写作" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="听说" stroke="#f97316" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="综合" stroke="#0f766e" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="阅读" stroke="#2563eb" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} name={t("阅读")} />
+                  <Line type="monotone" dataKey="写作" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} name={t("写作")} />
+                  <Line type="monotone" dataKey="听说" stroke="#f97316" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} name={t("听说")} />
+                  <Line type="monotone" dataKey="综合" stroke="#0f766e" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} name={t("综合")} />
                 </ReLineChart>
               </ResponsiveContainer>
-            </div> : <div className="empty-state"><strong>暂无历史测验记录</strong><span>累计多次测验后再展示学习趋势。</span></div>}
+            </div> : <div className="empty-state"><strong>{t("暂无历史测验记录")}</strong><span>{t("累计多次测验后再展示学习趋势。")}</span></div>}
           </section>
 
           <section className="panel">
-            <PanelHeader icon={ClipboardList} title="学习进度框架图" action="诊断-干预-跟踪-调整" />
+            <PanelHeader icon={ClipboardList} title={t("学习进度框架图")} action={t("诊断-干预-跟踪-调整")} />
             <div className="framework-map">
-              {!profile.framework.length && <p className="empty-state">暂无已确认的干预计划</p>}
+              {!profile.framework.length && <p className="empty-state">{t("暂无已确认的干预计划")}</p>}
               {profile.framework.map((step, index) => (
                 <article className={`framework-step ${statusClass(step.status)}`} key={step.stage}>
-                  <span className="step-index">{index + 1}</span>
-                  <small>{step.stage}</small>
-                  <strong>{step.title}</strong>
-                  <p>{step.detail}</p>
-                  <em>{step.status}</em>
+                  <span className="step-index">{t(index + 1)}</span>
+                  <small>{t(step.stage)}</small>
+                  <strong>{t(step.title)}</strong>
+                  <p>{t(step.detail)}</p>
+                  <em>{t(step.status)}</em>
                 </article>
               ))}
             </div>
@@ -2912,39 +2874,39 @@ function StudentPanel({
         </div>
 
         <section className="panel tracking-panel">
-          <PanelHeader icon={Activity} title="学生学情跟踪板" action="过程证据 + 下一步" />
+          <PanelHeader icon={Activity} title={t("学生学情跟踪板")} action={t("过程证据 + 下一步")} />
           <div className="tracking-board">
-            {!profile.trackers.length && <p className="empty-state">暂无跟踪记录</p>}
+            {!profile.trackers.length && <p className="empty-state">{t("暂无跟踪记录")}</p>}
             {profile.trackers.map((item) => (
               <article className="tracker-row" key={`${item.date}-${item.task}`}>
-                <div className="tracker-date">{item.date}</div>
+                <div className="tracker-date">{t(item.date)}</div>
                 <div className="tracker-main">
-                  <strong>{item.task}</strong>
-                  <span>{item.evidence}</span>
-                  <small>{item.next}</small>
+                  <strong>{t(item.task)}</strong>
+                  <span>{t(item.evidence)}</span>
+                  <small>{t(item.next)}</small>
                 </div>
-                <span className={`status-chip ${statusClass(item.status)}`}>{item.status}</span>
+                <span className={`status-chip ${statusClass(item.status)}`}>{t(item.status)}</span>
               </article>
             ))}
           </div>
         </section>
 
         <section className="panel task-closure-panel">
-          <PanelHeader icon={ClipboardCheck} title="本周任务闭环" action="流程示例 · 非个人完成记录" />
+          <PanelHeader icon={ClipboardCheck} title={t("本周任务闭环")} action={t("流程示例 · 非个人完成记录")} />
           <div className="task-closure-grid">
-            {!savedProfile && <p className="empty-state">暂无已分配的个人任务</p>}
+            {!savedProfile && <p className="empty-state">{t("暂无已分配的个人任务")}</p>}
             {(savedProfile ? studentTaskClosures : []).map((item) => (
               <article className={`task-closure-card ${statusClass(item.status)}`} key={item.label}>
-                <span>{item.status}</span>
-                <strong>{item.label}</strong>
-                <p>{item.detail}</p>
+                <span>{t(item.status)}</span>
+                <strong>{t(item.label)}</strong>
+                <p>{t(item.detail)}</p>
               </article>
             ))}
           </div>
         </section>
 
         <section className="panel">
-          <PanelHeader icon={BookMarked} title="个人错题本" action="错因解释 + 同类练习" />
+          <PanelHeader icon={BookMarked} title={t("个人错题本")} action={t("错因解释 + 同类练习")} />
           <div className="panel-inline-actions">
             <button
               className="secondary-button"
@@ -2960,24 +2922,22 @@ function StudentPanel({
               type="button"
             >
               <ClipboardCheck size={16} />
-              {copiedMistakeBook === buildMistakeBookText() ? "已复制错题本" : "复制错题本"}
+              {t(copiedMistakeBook === buildMistakeBookText() ? "已复制错题本" : "复制错题本")}
             </button>
             <button
               className="secondary-button"
               onClick={() =>
                 downloadTextFile(
                   buildMistakeBookText(),
-                  `${selectedStudent?.studentName ?? "学生"}-个人错题本.md`,
+                  t("{0}-个人错题本.md", [selectedStudent?.studentName ?? "学生"]),
                   "text/markdown;charset=utf-8",
                 )
               }
               type="button"
             >
-              <Download size={16} />
-              导出打印版
-            </button>
+              <Download size={16} />{t("导出打印版")}</button>
           </div>
-          {studentCopyError && <p role="status">{studentCopyError}</p>}
+          {studentCopyError && <p role="status">{t(studentCopyError)}</p>}
           <div className="mistake-list">
             {wrongAttempts.length ? (
               wrongAttempts.map((attempt) => {
@@ -2985,13 +2945,13 @@ function StudentPanel({
                 return (
                   <article className="mistake-card" key={`${attempt.studentId}-${attempt.questionId}`}>
                     <div>
-                      <span className="tag">Q{question.number} · {question.questionType}</span>
-                      <h3>{question.title}</h3>
-                      <p>{question.diagnosis.narrative}</p>
+                      <span className="tag">Q{t(question.number)} · {t(question.questionType)}</span>
+                      <h3>{t(question.title)}</h3>
+                      <p>{t(question.diagnosis.narrative)}</p>
                     </div>
                     <div className="mistake-side">
-                      <strong>{attempt.cause}</strong>
-                      <small>我的答案：{attempt.selected}</small>
+                      <strong>{t(attempt.cause)}</strong>
+                      <small>{t("我的答案：")}{t(attempt.selected)}</small>
                       <Progress value={attempt.mastery} />
                     </div>
                   </article>
@@ -3000,27 +2960,27 @@ function StudentPanel({
             ) : (
               <div className="empty-state">
                 <CircleCheck size={32} />
-                <strong>本次暂无错题</strong>
-                <span>继续完成高考拓展题，保持阅读和写作节奏。</span>
+                <strong>{t("本次暂无错题")}</strong>
+                <span>{t("继续完成高考拓展题，保持阅读和写作节奏。")}</span>
               </div>
             )}
           </div>
         </section>
 
         <section className="panel next-steps">
-          <PanelHeader icon={Play} title="下一步学习建议" action="15分钟" />
+          <PanelHeader icon={Play} title={t("下一步学习建议")} action={t("15分钟")} />
           <div className="next-step-grid">
             <div>
-              <strong>1. 复盘关键词</strong>
-              <span>标出题干关键词、原文定位句和干扰选项。</span>
+              <strong>{t("1. 复盘关键词")}</strong>
+              <span>{t("标出题干关键词、原文定位句和干扰选项。")}</span>
             </div>
             <div>
-              <strong>2. 拆一句长难句</strong>
-              <span>主干、修饰、指代各写一行。</span>
+              <strong>{t("2. 拆一句长难句")}</strong>
+              <span>{t("主干、修饰、指代各写一行。")}</span>
             </div>
             <div>
-              <strong>3. 做一题同类迁移</strong>
-              <span>完成后写出排除两个选项的理由。</span>
+              <strong>{t("3. 做一题同类迁移")}</strong>
+              <span>{t("完成后写出排除两个选项的理由。")}</span>
             </div>
           </div>
         </section>
@@ -3042,12 +3002,13 @@ function MetricCard({
   value: string;
   trend: string;
 }) {
+  const { t } = useLocale();
   return (
     <article className={`metric-card ${tone}`}>
       <div className="metric-icon"><Icon size={20} /></div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{trend}</small>
+      <span>{t(label)}</span>
+      <strong>{t(value)}</strong>
+      <small>{t(trend)}</small>
     </article>
   );
 }
@@ -3061,13 +3022,14 @@ function PanelHeader({
   title: string;
   action?: string;
 }) {
+  const { t } = useLocale();
   return (
     <div className="panel-header">
       <div>
         <Icon size={18} />
-        <h2>{title}</h2>
+        <h2>{t(title)}</h2>
       </div>
-      {action && <span>{action}</span>}
+      {action && <span>{t(action)}</span>}
     </div>
   );
 }

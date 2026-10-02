@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test:i18n": "node scripts/i18n-test.mjs",
     "test:live-data": "node --experimental-strip-types scripts/live-data-test.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
