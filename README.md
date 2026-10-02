@@ -27,6 +27,7 @@ npm run build    # 产物在 dist/
 
 ## 设计依据
 
+- [design-refresh.md](design-refresh.md)：Grid 参考图改版、网站调研和下载的设计 skill；白色顶部导航、功能网格、移动端完整菜单与学校标识清理
 - [teacher-demand-audit.md](teacher-demand-audit.md)：基于小红书教师需求调研的功能优先级
 - [github-platform-benchmark.md](github-platform-benchmark.md)：高星教育平台代码与工作流对标，以及本 demo 的取舍
 - 参考主流学情分析产品（智学网、极课大数据、好分数）的报告分层、班级对比、错题本打印、个性化学习手册等模式

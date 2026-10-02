@@ -16,18 +16,17 @@ import {
   FileCheck2,
   FileText,
   Filter,
-  GraduationCap,
+  Menu,
+  X,
   LayoutDashboard,
   LineChart,
   MessageSquareText,
-  Monitor,
   Play,
   Printer,
   RefreshCw,
   SearchCheck,
   Send,
   ShieldCheck,
-  Smartphone,
   Sparkles,
   Target,
   UploadCloud,
@@ -35,8 +34,6 @@ import {
   Users,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -57,7 +54,6 @@ import {
   assignments,
   causeStack,
   classSnapshots,
-  closedLoopMetrics,
   essayWorkbench,
   essayStressCsv,
   essayStressSamples,
@@ -66,7 +62,6 @@ import {
   heatmap,
   heatmapColumns,
   importSources,
-  interventionGroups,
   liveDemoCsv,
   liveQuestionGuide,
   knowledgeGraphNodes,
@@ -74,7 +69,6 @@ import {
   masteryMatrixSkills,
   masterySkillActions,
   optionMisconceptions,
-  platformFeatureBenchmarks,
   repeatedErrorTracks,
   reportPreviewItems,
   reportTemplates,
@@ -95,6 +89,7 @@ import {
   safeAggregateMetricLabel,
 } from "./security";
 import type { PracticeItem, QuestionItem, StudentAttempt } from "./types";
+import { OverviewWorkspace } from "./components/OverviewWorkspace";
 
 type PanelId =
   | "overview"
@@ -125,12 +120,16 @@ const teacherNav = [
 const mobileNav = [
   { id: "overview", label: "总览", icon: LayoutDashboard },
   { id: "upload", label: "导入", icon: UploadCloud },
-  { id: "diagnosis", label: "错因", icon: SearchCheck },
+  { id: "results", label: "批改", icon: FileCheck2 },
   { id: "analytics", label: "学情", icon: BarChart3 },
-  { id: "reports", label: "报告", icon: FileText },
-  { id: "ima", label: "ima", icon: Brain },
-  { id: "student", label: "学生", icon: UserRound },
 ] satisfies Array<{ id: PanelId; label: string; icon: typeof LayoutDashboard }>;
+
+const readPanelFromUrl = (): PanelId => {
+  const value = window.location.hash.slice(1);
+  return value === "student" || teacherNav.some((item) => item.id === value)
+    ? value as PanelId
+    : "overview";
+};
 
 const sampleQuestionText = `Passage C: As electric buses become common in many cities, engineers are testing ways to reuse the energy created when buses slow down.
 
@@ -603,8 +602,42 @@ const buildDeepSeekPrompt = ({
 };
 
 function App() {
-  const [activePanel, setActivePanel] = useState<PanelId>("overview");
+  const [activePanel, setActivePanel] = useState<PanelId>(readPanelFromUrl);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDialogElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (window.location.hash.slice(1) !== activePanel) {
+      window.history.pushState(null, "", `#${activePanel}`);
+    }
+    setMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [activePanel]);
+  useEffect(() => {
+    const syncPanel = () => setActivePanel(readPanelFromUrl());
+    window.addEventListener("hashchange", syncPanel);
+    window.addEventListener("popstate", syncPanel);
+    return () => {
+      window.removeEventListener("hashchange", syncPanel);
+      window.removeEventListener("popstate", syncPanel);
+    };
+  }, []);
+  useEffect(() => {
+    const dialog = mobileMenuRef.current;
+    if (mobileMenuOpen) {
+      dialog?.showModal();
+      const previous = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = previous;
+        dialog?.close();
+        mobileMenuButtonRef.current?.focus();
+      };
+    }
+    dialog?.close();
+  }, [mobileMenuOpen]);
   const [selectedClass, setSelectedClass] = useState("高二(3)班");
+  const [lessonCompletions, setLessonCompletions] = useState<Record<string, string[]>>({});
   const [selectedQuestionId, setSelectedQuestionId] = useState("q1");
   const [selectedStudentId, setSelectedStudentId] = useState("s2");
   const [questionText, setQuestionText] = useState(sampleQuestionText);
@@ -943,17 +976,13 @@ function App() {
   }[activePanel];
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <GraduationCap size={24} />
-          </div>
-          <div>
-            <p>英语备课组</p>
-            <strong>学情分析平台</strong>
-          </div>
-        </div>
+    <div className={`app-shell workspace ${activePanel === "overview" ? "is-overview" : ""}`}>
+      <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); document.getElementById("main-content")?.scrollIntoView(); }}>跳到主要内容</a>
+      <header className="workspace-header">
+        <button className="workspace-brand" onClick={() => setActivePanel("overview")} type="button" aria-label="英语备课组学情分析平台首页">
+          <strong>英语备课组</strong>
+          <span>学情分析平台</span>
+        </button>
 
         <nav className="nav-list" aria-label="教师端导航">
           {teacherNav.map((item) => (
@@ -963,29 +992,25 @@ function App() {
               onClick={() => setActivePanel(item.id)}
               type="button"
               title={item.label}
+              aria-current={activePanel === item.id ? "page" : undefined}
             >
-              <item.icon size={18} />
+              <item.icon size={16} aria-hidden="true" />
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
 
-        <div className="side-card">
-          <div className="device-pair">
-            <Monitor size={18} />
-            <span>网页端</span>
-            <Smartphone size={18} />
-            <span>移动端</span>
-          </div>
-          <p>默认使用模拟数据；导入页可本地解析老师自带表格，不上传服务器。</p>
+        <div className="mode-switch" role="group" aria-label="切换角色视图">
+          <button className={activePanel !== "student" ? "selected" : ""} aria-pressed={activePanel !== "student"} onClick={() => setActivePanel("overview")} type="button">教师</button>
+          <button className={activePanel === "student" ? "selected" : ""} aria-pressed={activePanel === "student"} onClick={() => setActivePanel("student")} type="button">学生</button>
         </div>
-      </aside>
+      </header>
 
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div>
-            <p className="eyebrow">合作校英语教研 · 演示数据</p>
-            <h1>{panelTitle}</h1>
+            <p className="eyebrow">{activePanel === "student" ? "我的学习" : "教师工作台"} <span>· 演示数据</span></p>
+            <h1>{activePanel === "overview" ? "英语备课组学情分析平台" : panelTitle}</h1>
           </div>
           <div className="top-actions">
             <span className="data-badge">
@@ -995,6 +1020,7 @@ function App() {
             <label className="select-wrap">
               <Filter size={16} />
               <select
+                aria-label="选择班级"
                 value={selectedClass}
                 onChange={(event) => setSelectedClass(event.target.value)}
               >
@@ -1005,22 +1031,6 @@ function App() {
                 ))}
               </select>
             </label>
-            <div className="mode-switch">
-              <button
-                className={activePanel !== "student" ? "selected" : ""}
-                onClick={() => setActivePanel("overview")}
-                type="button"
-              >
-                教师
-              </button>
-              <button
-                className={activePanel === "student" ? "selected" : ""}
-                onClick={() => setActivePanel("student")}
-                type="button"
-              >
-                学生
-              </button>
-            </div>
           </div>
         </header>
 
@@ -1028,7 +1038,7 @@ function App() {
           <section className="analysis-context-bar" aria-label="当前分析范围">
             <div className="analysis-context-main">
               <FileText size={17} />
-              <span>当前周测</span>
+              <span>演示周测</span>
               <strong>{assignment.title}</strong>
             </div>
             <div className="analysis-context-meta">
@@ -1045,9 +1055,21 @@ function App() {
         )}
 
         {activePanel === "overview" && (
-          <Overview
+          <OverviewWorkspace
             classSnapshot={classSnapshot}
             lowQuestions={lowQuestions}
+            completedTasks={lessonCompletions[selectedClass] ?? []}
+            onToggleTask={(id) => setLessonCompletions((previous) => {
+              const tasks = previous[selectedClass] ?? [];
+              return { ...previous, [selectedClass]: tasks.includes(id) ? tasks.filter((task) => task !== id) : [...tasks, id] };
+            })}
+            onPractice={(id) => {
+              const question = assignment.questions.find((item) => item.id === id);
+              if (!question) return;
+              setSelectedQuestionId(id);
+              setGenerated(question.diagnosis.practiceItems);
+              setActivePanel("practice");
+            }}
             onNavigate={setActivePanel}
             onSelectQuestion={(id) => {
               setSelectedQuestionId(id);
@@ -1147,6 +1169,15 @@ function App() {
         )}
       </main>
 
+      <footer className="workspace-footer"><span>英语备课组学情分析平台</span><span>演示数据 · 不关联任何学校</span></footer>
+      <dialog className="workspace-menu" ref={mobileMenuRef} aria-labelledby="workspace-menu-title" onCancel={() => setMobileMenuOpen(false)} onClose={() => setMobileMenuOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
+        <div className="workspace-menu-head"><h2 id="workspace-menu-title">全部功能</h2><button type="button" className="icon-button" aria-label="关闭全部功能" onClick={() => setMobileMenuOpen(false)}><X size={20} /></button></div>
+        <nav aria-label="全部功能导航">
+          {[...teacherNav, { id: "student" as const, label: "学生", icon: UserRound }].map((item) => (
+            <button type="button" key={item.id} className={activePanel === item.id ? "active" : ""} aria-current={activePanel === item.id ? "page" : undefined} onClick={() => { setActivePanel(item.id); setMobileMenuOpen(false); }}><item.icon size={20} aria-hidden="true" /><span>{item.label}</span><ChevronRight size={16} aria-hidden="true" /></button>
+          ))}
+        </nav>
+      </dialog>
       <nav className="mobile-nav" aria-label="移动端导航">
         {mobileNav.map((item) => (
           <button
@@ -1155,318 +1186,18 @@ function App() {
             onClick={() => setActivePanel(item.id)}
             type="button"
             title={item.label}
+            aria-current={activePanel === item.id ? "page" : undefined}
           >
             <item.icon size={19} />
             <span>{item.label}</span>
           </button>
         ))}
+        <button type="button" ref={mobileMenuButtonRef} className={!mobileNav.some((item) => item.id === activePanel) ? "active" : ""} aria-expanded={mobileMenuOpen} aria-haspopup="dialog" onClick={() => setMobileMenuOpen(true)}><Menu size={19} aria-hidden="true" /><span>更多</span></button>
       </nav>
     </div>
   );
 }
 
-function Overview({
-  classSnapshot,
-  lowQuestions,
-  onNavigate,
-  onSelectQuestion,
-}: {
-  classSnapshot: (typeof classSnapshots)[number];
-  lowQuestions: QuestionItem[];
-  onNavigate: (id: PanelId) => void;
-  onSelectQuestion: (id: string) => void;
-}) {
-  return (
-    <div className="page-grid">
-      <section className="demo-hero panel">
-        <div className="hero-copy">
-          <span className="hero-kicker">
-            <BadgeCheck size={16} />
-            第一版 demo · 面向高中英语备课组
-          </span>
-          <h2>把批改结果变成可讨论、可追踪、可落课的学情证据</h2>
-          <p>
-            这版重点演示老师导入题目与成绩后，平台如何自动汇总批改结果、定位单题错因、生成班级学情图表，并把问题转化为下节课微训练和学生同类练习。
-          </p>
-          <div className="hero-actions">
-            <button className="primary-button" onClick={() => onSelectQuestion(lowQuestions[0].id)} type="button">
-              <SearchCheck size={16} />
-              看最低分错题
-            </button>
-            <button className="secondary-button" onClick={() => onNavigate("upload")} type="button">
-              <UploadCloud size={16} />
-              体验导入流程
-            </button>
-          </div>
-        </div>
-        <div className="hero-proof">
-          <div>
-            <strong>9类</strong>
-            <span>错因标签</span>
-          </div>
-          <div>
-            <strong>6题型</strong>
-            <span>阅读+续写覆盖</span>
-          </div>
-          <div>
-            <strong>4步</strong>
-            <span>批改到教学闭环</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="panel priority-panel">
-        <PanelHeader icon={Activity} title="今日教师工作台" action="先处理高价值动作" />
-        <div className="priority-grid">
-          <button className="priority-card accent" onClick={() => onSelectQuestion(lowQuestions[0].id)} type="button">
-            <span>待讲评</span>
-            <strong>Q{lowQuestions[0].number} {lowQuestions[0].questionType}</strong>
-            <small>{percent(lowQuestions[0].correctRate)}正确率 · {lowQuestions[0].diagnosis.causes.slice(0, 2).join(" / ")}</small>
-            <em>查看证据链</em>
-          </button>
-          <button className="priority-card" onClick={() => onNavigate("upload")} type="button">
-            <span>试用入口</span>
-            <strong>导入真实成绩</strong>
-            <small>粘贴 Excel/CSV 后本地解析，不上传服务器</small>
-            <em>进入导入台</em>
-          </button>
-          <button className="priority-card" onClick={() => onNavigate("analytics")} type="button">
-            <span>学情判断</span>
-            <strong>题-人-薄弱点</strong>
-            <small>{classSnapshot.riskStudents}人需跟进 · 写作{classSnapshot.writingScore}/40</small>
-            <em>看可视化</em>
-          </button>
-          <button className="priority-card" onClick={() => onNavigate("reports")} type="button">
-            <span>汇报材料</span>
-            <strong>生成周报话术</strong>
-            <small>备课组、校长、家长三种口径可切换</small>
-            <em>打开报告</em>
-          </button>
-          <button className="priority-card" onClick={() => onNavigate("student")} type="button">
-            <span>学生端</span>
-            <strong>个人错题跟踪</strong>
-            <small>错因解释、掌握度变化、下一步任务</small>
-            <em>查看学生</em>
-          </button>
-        </div>
-      </section>
-
-      <section className="metric-grid">
-        <MetricCard
-          icon={Target}
-          label="班级平均正确率"
-          tone="blue"
-          value={percent(classSnapshot.averageAccuracy)}
-          trend="+5.2% / 6周"
-        />
-        <MetricCard
-          icon={ClipboardCheck}
-          label="完成率"
-          tone="green"
-          value={percent(classSnapshot.completionRate)}
-          trend="42/44 人"
-        />
-        <MetricCard
-          icon={MessageSquareText}
-          label="写作均分"
-          tone="orange"
-          value={`${classSnapshot.writingScore}/40`}
-          trend="读后续写偏弱"
-        />
-        <MetricCard
-          icon={AlertTriangle}
-          label="需跟进学生"
-          tone="red"
-          value={`${classSnapshot.riskStudents} 人`}
-          trend="连续两次低于60%"
-        />
-      </section>
-
-      <section className="demo-flow">
-        <button className="demo-step" onClick={() => onNavigate("upload")} type="button">
-          <span>01</span>
-          <strong>导入数据</strong>
-          <small>识别试卷、成绩和能力标签</small>
-        </button>
-        <button className="demo-step" onClick={() => onNavigate("results")} type="button">
-          <span>02</span>
-          <strong>批改诊断</strong>
-          <small>定位错题类型和共性错因</small>
-        </button>
-        <button className="demo-step" onClick={() => onNavigate("analytics")} type="button">
-          <span>03</span>
-          <strong>学情可视化</strong>
-          <small>看班级、题型、能力变化</small>
-        </button>
-        <button className="demo-step" onClick={() => onNavigate("practice")} type="button">
-          <span>04</span>
-          <strong>推送练习</strong>
-          <small>给学生同类迁移与订正建议</small>
-        </button>
-      </section>
-
-      <section className="panel benchmark-panel">
-        <PanelHeader icon={ShieldCheck} title="中小学平台能力补齐" action="参考竞品后加入" />
-        <div className="benchmark-grid">
-          {platformFeatureBenchmarks.map((item) => (
-            <article className="benchmark-card" key={item.id}>
-              <strong>{item.title}</strong>
-              <p>{item.signal}</p>
-              <span>{item.demoAction}</span>
-            </article>
-          ))}
-        </div>
-        <div className="closure-metrics">
-          {closedLoopMetrics.map((item) => (
-            <div key={item.label}>
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.detail}</small>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="decision-grid">
-        <div className="panel action-panel">
-          <PanelHeader icon={ClipboardCheck} title="下节课建议" action="备课组可直接讨论" />
-          <div className="action-list">
-            <div>
-              <span>12分钟</span>
-              <strong>段落功能标注</strong>
-              <p>围绕主旨与推断错题，先判断段落作用，再回到选项边界。</p>
-            </div>
-            <div>
-              <span>8分钟</span>
-              <strong>长难句证据链</strong>
-              <p>把关键句拆成主干、修饰和指代对象，降低词义猜测误判。</p>
-            </div>
-            <div>
-              <span>课后</span>
-              <strong>同类迁移练习</strong>
-              <p>给错误学生推送 2 道同类题，要求写出排除选项理由。</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="panel capability-panel">
-          <PanelHeader icon={GraduationCap} title="高考能力映射" action="教考衔接口径" />
-          <div className="capability-list">
-            {[
-              ["阅读理解", "主旨、推断、细节、词义猜测"],
-              ["综合读写", "读后续写情节证据链与语言连贯"],
-              ["语言能力", "词汇语境、长难句、语法结构"],
-              ["思维品质", "概括、推断、判断选项边界"],
-            ].map(([title, detail]) => (
-              <div key={title}>
-                <strong>{title}</strong>
-                <span>{detail}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="panel intervention-panel">
-        <PanelHeader icon={Users} title="分层干预看板" action="按错因自动成组" />
-        <div className="intervention-grid">
-          {interventionGroups.map((group) => (
-            <article className={`intervention-card ${group.tone}`} key={group.id}>
-              <div className="intervention-head">
-                <span>{group.count}人</span>
-                <strong>{group.title}</strong>
-              </div>
-              <p>{group.basis}</p>
-              <div className="intervention-action">
-                <small>{group.owner}</small>
-                <b>{group.action}</b>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="two-column">
-        <div className="panel chart-panel">
-          <PanelHeader
-            icon={LineChart}
-            title="六周能力趋势"
-            action="阅读与写作同步提升"
-          />
-          <div className="chart-frame">
-            <ResponsiveContainer height={260} width="100%">
-              <AreaChart data={accuracyTrend} margin={{ top: 10, right: 20, left: -18, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="reading" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
-                <XAxis dataKey="week" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} domain={[40, 90]} />
-                <Tooltip />
-                <Area
-                  dataKey="阅读"
-                  stroke="#2563eb"
-                  fill="url(#reading)"
-                  strokeWidth={3}
-                  type="monotone"
-                  isAnimationActive={false}
-                />
-                <Line dataKey="写作" stroke="#f97316" strokeWidth={3} type="monotone" isAnimationActive={false} />
-                <Line dataKey="听说" stroke="#16a34a" strokeWidth={3} type="monotone" isAnimationActive={false} />
-                <Legend />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="panel">
-          <PanelHeader icon={AlertTriangle} title="重点错题排行" action="按正确率升序" />
-          <div className="question-rank">
-            {lowQuestions.slice(0, 5).map((question) => (
-              <button
-                className="rank-row"
-                key={question.id}
-                onClick={() => onSelectQuestion(question.id)}
-                type="button"
-              >
-                <span className="rank-number">Q{question.number}</span>
-                <span>
-                  <strong>{question.questionType}</strong>
-                  <small>{question.diagnosis.causes.join(" / ")}</small>
-                </span>
-                <b>{percent(question.correctRate)}</b>
-                <ChevronRight size={18} />
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="panel insight-strip">
-        <div className="strip-copy">
-          <PanelHeader icon={BadgeCheck} title="教考衔接依据" action="广东 2026" />
-          <p>
-            英语听说考试成绩按卷面分除以 3 计入英语科；新课标卷强化阅读、写作、真实情境和思维品质。当前班级最需要把“错因标签”转化为课堂微技能训练。
-          </p>
-        </div>
-        <div className="source-links">
-          <a href="https://eea.gd.gov.cn/ptgk/content/post_4881153.html" target="_blank">
-            广东英语听说成绩 <ExternalLink size={14} />
-          </a>
-          <a href="https://www.neea.edu.cn/xhtml1/report/2401/499-1.htm" target="_blank">
-            新课标卷解读 <ExternalLink size={14} />
-          </a>
-          <a href="https://www.sohu.com/a/1033862114_121106884" target="_blank">
-            2026英语评析 <ExternalLink size={14} />
-          </a>
-        </div>
-      </section>
-    </div>
-  );
-}
 
 function UploadPanel({
   analysisReady,
@@ -1576,6 +1307,7 @@ function UploadPanel({
       <section className="panel editor-card">
         <PanelHeader icon={FileText} title="题目文本" action="自动识别题型与答案" />
         <textarea
+          aria-label="题目文本"
           value={questionText}
           onChange={(event) => {
             setQuestionText(event.target.value);
@@ -1682,13 +1414,14 @@ function UploadPanel({
         </div>
         <textarea
           className="live-data-input"
+          aria-label="学生成绩表"
           maxLength={MAX_LIVE_DATA_CHARS}
           onChange={(event) => setLiveCsv(event.target.value.slice(0, MAX_LIVE_DATA_CHARS))}
           placeholder="从 Excel 复制表头和学生成绩后粘贴到这里，或上传 CSV 文件。"
           ref={liveInputRef}
           value={liveCsv}
         />
-        <div className={liveSummary ? "live-message ready" : "live-message"}>
+        <div className={liveSummary ? "live-message ready" : "live-message"} role="status">
           <CircleCheck size={16} />
           <span>{liveMessage}</span>
         </div>
@@ -1931,6 +1664,7 @@ function ResultsPanel({
             </label>
             <textarea
               className="essay-live-input"
+              aria-label="学生作文原文"
               maxLength={MAX_ESSAY_CHARS}
               onChange={(event) => setEssayText(event.target.value.slice(0, MAX_ESSAY_CHARS))}
               placeholder="把学生作文、读后续写或应用文原文粘贴到这里。演示版支持 txt/csv 文本上传；Word/PDF 可在正式版接入解析服务。"
@@ -2364,7 +2098,7 @@ function AnalyticsPanel() {
           当前最集中的问题不是单纯“不会做题”，而是篇章逻辑、词汇语境和审题边界叠加影响。
         </div>
         <div className="chart-frame">
-          <ResponsiveContainer height={280} width="100%">
+          <ResponsiveContainer height={280} width="100%" initialDimension={{ width: 320, height: 280 }}>
             <BarChart data={causeStack} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
               <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
               <XAxis dataKey="name" tickLine={false} axisLine={false} />
@@ -2383,7 +2117,7 @@ function AnalyticsPanel() {
       <section className="panel chart-panel">
         <PanelHeader icon={Activity} title="学生能力雷达" action="年级均值" />
         <div className="chart-frame">
-          <ResponsiveContainer height={280} width="100%">
+          <ResponsiveContainer height={280} width="100%" initialDimension={{ width: 320, height: 280 }}>
             <RadarChart data={skillRadar}>
               <PolarGrid stroke="#d9e1ec" />
               <PolarAngleAxis dataKey="skill" tick={{ fill: "#475569", fontSize: 12 }} />
@@ -2571,7 +2305,7 @@ function AnalyticsPanel() {
           高二(7)班整体落后约 5 个百分点且需跟进人数最多，建议备课组优先共享高二(3)班的讲评课设计。
         </div>
         <div className="chart-frame">
-          <ResponsiveContainer height={260} width="100%">
+          <ResponsiveContainer height={260} width="100%" initialDimension={{ width: 320, height: 260 }}>
             <BarChart data={classCompareData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
               <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
               <XAxis dataKey="name" tickLine={false} axisLine={false} />
@@ -2650,7 +2384,7 @@ function AnalyticsPanel() {
       <section className="panel chart-panel wide">
         <PanelHeader icon={LineChart} title="分项正确率趋势" action="阅读 / 写作 / 听说" />
         <div className="chart-frame">
-          <ResponsiveContainer height={240} width="100%">
+          <ResponsiveContainer height={240} width="100%" initialDimension={{ width: 320, height: 240 }}>
             <ReLineChart data={accuracyTrend} margin={{ top: 10, right: 22, left: -20, bottom: 0 }}>
               <CartesianGrid stroke="#e6eaf1" strokeDasharray="3 3" />
               <XAxis dataKey="week" tickLine={false} axisLine={false} />
@@ -3305,7 +3039,7 @@ function StudentPanel({
           <section className="panel">
             <PanelHeader icon={LineChart} title="个人学习进度曲线" action="按周跟踪" />
             <div className="chart-box student-chart">
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={250} initialDimension={{ width: 320, height: 250 }}>
                 <ReLineChart data={profile.progressTrend} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="week" tickLine={false} axisLine={false} />

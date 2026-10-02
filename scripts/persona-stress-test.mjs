@@ -80,7 +80,11 @@ async function firstVisible(locator) {
 }
 
 async function clickButton(page, name, scope) {
-  const item = await firstVisible(page.getByRole("button", { name, exact: true }));
+  let item = await firstVisible(page.getByRole("button", { name, exact: true }));
+  if (!item && await page.getByRole("button", { name: "更多", exact: true }).isVisible()) {
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    item = await firstVisible(page.getByRole("navigation", { name: "全部功能导航" }).getByRole("button", { name, exact: true }));
+  }
   if (!item) {
     recordFailure(scope, `找不到可见按钮：${name}`);
     return false;
@@ -287,7 +291,7 @@ async function runStudent(page) {
       await clickText(page, pick(["Q21", "Q24", "Q31"]), scope);
       return true;
     },
-    async (scope) => clickButton(page, pick(["总览", "学情", "报告", "ima"]), scope),
+    async (scope) => clickButton(page, pick(["总览", "学情", "报告", "ima助手"]), scope),
   ];
 
   for (let index = 0; index < iterations; index += 1) {
@@ -339,7 +343,7 @@ async function runNeeds(browser) {
       name: "老师手机快看学情",
       page: mobilePage,
       run: async (scope) => {
-        await clickButton(mobilePage, pick(["总览", "学情", "报告", "ima"]), scope);
+        await clickButton(mobilePage, pick(["总览", "学情", "报告", "ima助手"]), scope);
       },
     },
   ];

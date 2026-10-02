@@ -34,11 +34,12 @@ const viewports = [
   { id: "laptop", width: 1366, height: 768, mobile: false },
   { id: "tablet", width: 768, height: 1024, mobile: true },
   { id: "mobile", width: 390, height: 844, mobile: true },
+  { id: "narrow", width: 320, height: 740, mobile: true },
 ];
 
 const panels = {
-  desktop: ["总览", "导入", "错因", "学情", "报告", "ima助手", "练习"],
-  mobile: ["总览", "导入", "错因", "学情", "报告", "ima", "学生"],
+  desktop: ["总览", "导入", "批改", "错因", "学情", "报告", "ima助手", "练习", "学生"],
+  mobile: ["总览", "导入", "批改", "错因", "学情", "报告", "ima助手", "练习", "学生"],
 };
 
 const report = {
@@ -60,7 +61,11 @@ function addIssue(scope, severity, message, detail) {
 }
 
 async function clickButton(page, name) {
-  const locator = page.getByRole("button", { name, exact: true }).first();
+  let locator = page.getByRole("button", { name, exact: true }).filter({ visible: true }).first();
+  if (!(await locator.isVisible()) && await page.getByRole("button", { name: "更多", exact: true }).isVisible()) {
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    locator = page.getByRole("navigation", { name: "全部功能导航" }).getByRole("button", { name, exact: true });
+  }
   await locator.waitFor({ state: "visible", timeout: 8000 });
   await locator.click();
   await page.waitForTimeout(180);
@@ -162,6 +167,7 @@ async function analyzePage(page, scope) {
         if (
           fontSize > 22 &&
           !element.closest(".metric-card") &&
+          !element.closest(".tile-number, .followup-number") &&
           !element.closest(".mastery-score-line") &&
           !element.closest(".report-document")
         ) {
@@ -221,7 +227,8 @@ async function analyzePage(page, scope) {
     const mobileNavRect = mobileNav?.getBoundingClientRect();
 
     const h1Font = h1Style ? Number.parseFloat(h1Style.fontSize) : 0;
-    if (viewportWidth <= 430 && h1Font > 19) {
+    const mobileTitleLimit = document.querySelector(".workspace.is-overview") ? 26 : 21;
+    if (viewportWidth <= 430 && h1Font > mobileTitleLimit) {
       issues.push({ type: "mobile-title-too-large", fontSize: h1Font });
     }
     if (heroRect && viewportWidth <= 430 && heroRect.height > viewportHeight * 0.42) {
@@ -237,7 +244,7 @@ async function analyzePage(page, scope) {
         height: Math.round(metricRect.height),
       });
     }
-    if (mobileNavRect && mobileNavRect.height > 64) {
+    if (mobileNavRect && mobileNavRect.height > 80) {
       issues.push({
         type: "mobile-nav-too-tall",
         height: Math.round(mobileNavRect.height),
