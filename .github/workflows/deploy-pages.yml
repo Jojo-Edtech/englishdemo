@@ -35,6 +35,12 @@ jobs:
       - name: Test external AI privacy boundaries
         run: npm run test:security
 
+      - name: Test imported score calculations
+        run: npm run test:live-data
+
+      - name: Test writing rubric fixtures
+        run: npm run test:essay-rubric
+
       - name: Build
         run: npm run build
 

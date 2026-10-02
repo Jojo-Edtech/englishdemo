@@ -22,6 +22,7 @@ import {
   LineChart,
   MessageSquareText,
   Play,
+  PencilLine,
   Printer,
   RefreshCw,
   SearchCheck,
@@ -90,6 +91,8 @@ import {
 } from "./security";
 import type { PracticeItem, QuestionItem, StudentAttempt } from "./types";
 import { OverviewWorkspace } from "./components/OverviewWorkspace";
+import { analyzeLiveData as parseLiveData, findQuestionGuide } from "./lib/liveData";
+import type { LiveDataSummary, LiveWeakItem } from "./lib/liveData";
 
 type PanelId =
   | "overview"
@@ -139,255 +142,14 @@ B. To show how public transport used to work.
 C. To compare two unrelated inventions.
 D. To explain the need for a more efficient system.`;
 
-const percent = (value: number) => `${Math.round(value * 100)}%`;
-
-type LiveStudentRow = {
-  id: string;
-  displayName: string;
-  className: string;
-  total: number;
-  rate: number;
-  weakItems: string[];
-  completedCorrection: boolean;
-};
-
-type LiveWeakItem = {
-  field: string;
-  label: string;
-  type: string;
-  cause: string;
-  suggestion: string;
-  averageRate: number;
-  weakCount: number;
-};
-
-type LiveDataSummary = {
-  rowCount: number;
-  classNames: string[];
-  scoreColumns: string[];
-  maxTotal: number;
-  averageTotal: number;
-  averageRate: number;
-  riskCount: number;
-  completedCorrection: number;
-  weakItems: LiveWeakItem[];
-  causeCounts: Array<{ cause: string; count: number }>;
-  students: LiveStudentRow[];
-  quality: {
-    coverage: number;
-    duplicateRows: number;
-    missingClassRows: number;
-    missingIdentityRows: number;
-    missingScoreCells: number;
-    totalScoreCells: number;
-    validScoreCells: number;
-  };
-};
+const percent = (value: number | null) => value === null ? "暂无数据" : `${Math.round(value * 100)}%`;
 
 type DeepSeekStatus = "idle" | "ready" | "loading" | "success" | "error";
+type DeepSeekState = { status: DeepSeekStatus; message: string; result: string };
 
-type DeepSeekState = {
-  status: DeepSeekStatus;
-  message: string;
-  result: string;
-};
-
-const identityColumnPattern = /(学生ID|学号|姓名|学生姓名|学生|班级|年级|class|name|id)$/i;
-
-const parseScore = (value?: string) => {
-  if (!value) return null;
-  const cleaned = value.replace(/[,%分\s]/g, "");
-  if (!cleaned) return null;
-  const score = Number(cleaned);
-  return Number.isFinite(score) ? score : null;
-};
-
-const parseDelimitedLine = (line: string, delimiter: string) => {
-  if (delimiter === "\t") return line.split("\t");
-  const cells: string[] = [];
-  let current = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-    if (char === '"' && next === '"') {
-      current += '"';
-      index += 1;
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (char === delimiter && !quoted) {
-      cells.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  cells.push(current);
-  return cells;
-};
-
-const getQuestionGuide = (field: string) => {
-  const code = field.match(/Q\d+|听说/)?.[0];
-  return liveQuestionGuide.find((guide) => {
-    const guideCode = guide.field.match(/Q\d+|听说/)?.[0];
-    return field === guide.field || field.includes(guide.field) || guide.field.includes(field) || (!!code && code === guideCode);
-  });
-};
-
+const analyzeLiveData = (text: string) => parseLiveData(text, liveQuestionGuide);
 const aggregateWeakItemLabel = (item: LiveWeakItem, index: number) =>
-  getQuestionGuide(item.field)?.label ?? safeAggregateMetricLabel(item.field, index);
-
-const inferMaxScore = (field: string, observedMax: number) => {
-  const guide = getQuestionGuide(field);
-  if (guide) return guide.max;
-  if (observedMax <= 2) return 2;
-  if (observedMax <= 5) return 5;
-  if (observedMax <= 15) return 15;
-  if (observedMax <= 25) return 25;
-  if (observedMax <= 60) return 60;
-  return Math.max(observedMax, 1);
-};
-
-const maskStudentName = (name: string, index: number) => {
-  const prefix = `S${String(index + 1).padStart(2, "0")}`;
-  const cleaned = name.trim();
-  if (!cleaned) return `${prefix} 匿名学生`;
-  return `${prefix} ${cleaned.slice(0, 1)}同学`;
-};
-
-const analyzeLiveData = (rawText: string): LiveDataSummary | null => {
-  const lines = rawText
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length < 2) return null;
-
-  const delimiter = lines[0].includes("\t") ? "\t" : ",";
-  const headers = parseDelimitedLine(lines[0], delimiter).map((header) => header.trim());
-  const rawRows = lines.slice(1).map((line) => parseDelimitedLine(line, delimiter));
-  const records = rawRows.map((cells) =>
-    headers.reduce<Record<string, string>>((record, header, index) => {
-      record[header] = (cells[index] ?? "").trim();
-      return record;
-    }, {}),
-  );
-
-  const totalColumn = headers.find((header) => /总分|合计|total/i.test(header));
-  const scoreColumns = headers.filter((header) => {
-    if (header === totalColumn) return false;
-    if (identityColumnPattern.test(header)) return false;
-    return records.some((record) => parseScore(record[header]) !== null);
-  });
-
-  if (!scoreColumns.length) return null;
-
-  const totalScoreCells = records.length * scoreColumns.length;
-  const validScoreCells = records.reduce(
-    (sum, record) => sum + scoreColumns.filter((field) => parseScore(record[field]) !== null).length,
-    0,
-  );
-  const missingScoreCells = totalScoreCells - validScoreCells;
-  const identityValues = records.map((record) =>
-    (record["学生ID"] || record["学号"] || record["姓名"] || record["学生姓名"] || record["学生"] || "").trim(),
-  );
-  const identityCounts = identityValues.reduce<Map<string, number>>((counts, value) => {
-    if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
-    return counts;
-  }, new Map());
-  const duplicateRows = [...identityCounts.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
-  const missingIdentityRows = identityValues.filter((value) => !value).length;
-  const missingClassRows = records.filter((record) => !(record["班级"] || record["年级"] || "").trim()).length;
-
-  const maxByColumn = scoreColumns.reduce<Record<string, number>>((acc, field) => {
-    const observedMax = Math.max(...records.map((record) => parseScore(record[field]) ?? 0));
-    acc[field] = inferMaxScore(field, observedMax);
-    return acc;
-  }, {});
-  const maxTotal = scoreColumns.reduce((sum, field) => sum + maxByColumn[field], 0);
-
-  const students = records.map((record, index) => {
-    const totalFromColumn = totalColumn ? parseScore(record[totalColumn]) : null;
-    const availableColumns = scoreColumns.filter((field) => parseScore(record[field]) !== null);
-    const itemTotal = availableColumns.reduce((sum, field) => sum + (parseScore(record[field]) ?? 0), 0);
-    const availableMax = availableColumns.reduce((sum, field) => sum + maxByColumn[field], 0);
-    const total = totalFromColumn ?? itemTotal;
-    const weakItems = availableColumns.filter((field) => {
-      const score = parseScore(record[field]) ?? 0;
-      return score < maxByColumn[field] * 0.65;
-    });
-    const correctionValue = Object.entries(record).find(([key]) => key.includes("订正"))?.[1] ?? "";
-    return {
-      id: record["学生ID"] || record["学号"] || `S${String(index + 1).padStart(2, "0")}`,
-      displayName: maskStudentName(record["姓名"] || record["学生姓名"] || record["学生"] || "", index),
-      className: record["班级"] || record["年级"] || "未分班",
-      total,
-      rate:
-        totalFromColumn !== null && maxTotal > 0
-          ? totalFromColumn / maxTotal
-          : availableMax > 0
-            ? itemTotal / availableMax
-            : 0,
-      weakItems,
-      completedCorrection: /是|已|完成|1|true/i.test(correctionValue),
-    };
-  });
-
-  const weakItems = scoreColumns
-    .map((field) => {
-      const guide = getQuestionGuide(field);
-      const validRecords = records.filter((record) => parseScore(record[field]) !== null);
-      const totalScore = validRecords.reduce((sum, record) => sum + (parseScore(record[field]) ?? 0), 0);
-      const averageRate = validRecords.length ? totalScore / (validRecords.length * maxByColumn[field]) : 0;
-      const weakCount = validRecords.filter((record) => (parseScore(record[field]) ?? 0) < maxByColumn[field] * 0.65).length;
-      return {
-        field,
-        label: guide?.label ?? field,
-        type: guide?.type ?? "自定义题目",
-        cause: guide?.cause ?? "待老师确认",
-        suggestion: guide?.suggestion ?? "建议老师补充题型和错因标签后生成讲评建议。",
-        averageRate,
-        weakCount,
-      };
-    })
-    .sort((a, b) => a.averageRate - b.averageRate);
-
-  const causeCountMap = new Map<string, number>();
-  students.forEach((student) => {
-    student.weakItems.forEach((field) => {
-      const cause = getQuestionGuide(field)?.cause ?? "待老师确认";
-      causeCountMap.set(cause, (causeCountMap.get(cause) ?? 0) + 1);
-    });
-  });
-
-  const averageTotal = students.reduce((sum, student) => sum + student.total, 0) / students.length;
-  const averageRate = students.reduce((sum, student) => sum + student.rate, 0) / students.length;
-  return {
-    rowCount: students.length,
-    classNames: [...new Set(students.map((student) => student.className))],
-    scoreColumns,
-    maxTotal,
-    averageTotal,
-    averageRate,
-    riskCount: students.filter((student) => student.rate < 0.6 || student.weakItems.length >= 3).length,
-    completedCorrection: students.filter((student) => student.completedCorrection).length,
-    weakItems: weakItems.slice(0, 5),
-    causeCounts: [...causeCountMap.entries()]
-      .map(([cause, count]) => ({ cause, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 4),
-    students: students.slice(0, 8),
-    quality: {
-      coverage: totalScoreCells > 0 ? validScoreCells / totalScoreCells : 0,
-      duplicateRows,
-      missingClassRows,
-      missingIdentityRows,
-      missingScoreCells,
-      totalScoreCells,
-      validScoreCells,
-    },
-  };
-};
+  findQuestionGuide(item.field, liveQuestionGuide)?.label ?? safeAggregateMetricLabel(item.field, index);
 
 const downloadTextFile = (content: string, filename: string, mime = "text/csv;charset=utf-8") => {
   const blob = new Blob([content], { type: mime });
@@ -638,12 +400,19 @@ function App() {
   }, [mobileMenuOpen]);
   const [selectedClass, setSelectedClass] = useState("高二(3)班");
   const [lessonCompletions, setLessonCompletions] = useState<Record<string, string[]>>({});
+  const [warningStatusMap, setWarningStatusMap] = useState<Record<string, WarningStatus>>(() =>
+    Object.fromEntries(warningCases.map((item) => [item.student, item.status])),
+  );
+  const [assignedMasteryTasks, setAssignedMasteryTasks] = useState<string[]>([]);
+  const [studentFollowUps, setStudentFollowUps] = useState<Record<string, string[]>>({});
+  const [reportDrafts, setReportDrafts] = useState<Record<string, string>>({});
+  const [reportTone, setReportTone] = useState<ReportTone>("正式");
   const [selectedQuestionId, setSelectedQuestionId] = useState("q1");
   const [selectedStudentId, setSelectedStudentId] = useState("s2");
   const [questionText, setQuestionText] = useState(sampleQuestionText);
   const [fileName, setFileName] = useState("高二阅读与续写周测06.pdf");
   const [analysisReady, setAnalysisReady] = useState(true);
-  const [generated, setGenerated] = useState<PracticeItem[]>([]);
+  const [generated, setGenerated] = useState<{ questionId: string; items: PracticeItem[] } | null>(null);
   const [selectedReportId, setSelectedReportId] = useState(reportTemplates[0].id);
   const [copiedReport, setCopiedReport] = useState("");
   const [copiedImaText, setCopiedImaText] = useState("");
@@ -696,9 +465,7 @@ function App() {
   const filteredAttempts = useMemo(
     () =>
       assignment.attempts.filter((attempt) =>
-        selectedClass === "高三英语备课组"
-          ? true
-          : attempt.className === selectedClass,
+        attempt.className === selectedClass,
       ),
     [selectedClass],
   );
@@ -724,7 +491,7 @@ function App() {
 
   const handleGeneratePractice = () => {
     const next = selectedQuestion.diagnosis.practiceItems;
-    setGenerated(next);
+    setGenerated({ questionId: selectedQuestion.id, items: next });
     setActivePanel("practice");
   };
 
@@ -737,7 +504,7 @@ function App() {
     const summary = analyzeLiveData(nextCsv);
     if (!summary) {
       setLiveSummary(null);
-      setLiveMessage("暂时没有识别到有效成绩列。请保留表头，并至少包含姓名/班级和一列数字得分。");
+      setLiveMessage("未能解析成绩。请检查表头是否重复、每行列数是否一致，并保留姓名/班级及至少一个小题得分字段。");
       return;
     }
     setLiveSummary(summary);
@@ -764,10 +531,16 @@ function App() {
     }
     const reader = new FileReader();
     reader.onload = () => {
-      const text = String(reader.result ?? "").slice(0, MAX_LIVE_DATA_CHARS);
+      const text = String(reader.result ?? "");
+      if (text.length > MAX_LIVE_DATA_CHARS) {
+        setLiveSummary(null);
+        setLiveMessage("文件内容超过本地演示上限，未截断或解析。请拆分后再导入。");
+        return;
+      }
       setLiveCsv(text);
       handleAnalyzeLiveCsv(text);
     };
+    reader.onerror = () => setLiveMessage("文件读取失败，请重新选择文件或粘贴表格。");
     reader.readAsText(file, "utf-8");
   };
 
@@ -1017,7 +790,7 @@ function App() {
               <ShieldCheck size={16} />
               本地解析 · 不上传
             </span>
-            <label className="select-wrap">
+            {["overview", "diagnosis", "ima"].includes(activePanel) && <label className="select-wrap">
               <Filter size={16} />
               <select
                 aria-label="选择班级"
@@ -1030,7 +803,7 @@ function App() {
                   </option>
                 ))}
               </select>
-            </label>
+            </label>}
           </div>
         </header>
 
@@ -1042,10 +815,10 @@ function App() {
               <strong>{assignment.title}</strong>
             </div>
             <div className="analysis-context-meta">
-              <span>{selectedClass}</span>
+              <span>{["overview", "diagnosis", "ima"].includes(activePanel) ? selectedClass : activePanel === "analytics" ? "跨班级能力样例" : activePanel === "reports" ? "报告模板演示" : "测评样例"}</span>
               <span>{assignment.date}</span>
               <span className="context-source">{assignment.source}</span>
-              <b><CircleCheck size={14} /> 已完成分析</b>
+              <b><CircleCheck size={14} /> 演示样例</b>
             </div>
             <button onClick={() => setActivePanel("upload")} type="button">
               <RefreshCw size={15} />
@@ -1067,7 +840,7 @@ function App() {
               const question = assignment.questions.find((item) => item.id === id);
               if (!question) return;
               setSelectedQuestionId(id);
-              setGenerated(question.diagnosis.practiceItems);
+              setGenerated({ questionId: id, items: question.diagnosis.practiceItems });
               setActivePanel("practice");
             }}
             onNavigate={setActivePanel}
@@ -1092,7 +865,11 @@ function App() {
             onLoadLiveSample={handleLoadLiveSample}
             setAnalysisReady={setAnalysisReady}
             setFileName={setFileName}
-            setLiveCsv={setLiveCsv}
+            setLiveCsv={(text) => {
+              setLiveCsv(text);
+              setLiveSummary(null);
+              setLiveMessage("数据已更改，请重新解析。");
+            }}
             setQuestionText={setQuestionText}
             onPublish={() => setActivePanel("results")}
           />
@@ -1125,9 +902,18 @@ function App() {
             onGeneratePractice={handleGeneratePractice}
           />
         )}
-        {activePanel === "analytics" && <AnalyticsPanel />}
+        {activePanel === "analytics" && <AnalyticsPanel
+          warningStatusMap={warningStatusMap}
+          onWarningChange={(student, status) => setWarningStatusMap((previous) => ({ ...previous, [student]: status }))}
+          assignedMasteryTasks={assignedMasteryTasks}
+          onAssignTask={(key) => setAssignedMasteryTasks((previous) => previous.includes(key) ? previous : [...previous, key])}
+        />}
         {activePanel === "reports" && (
           <ReportsPanel
+            selectedTone={reportTone}
+            setSelectedTone={setReportTone}
+            drafts={reportDrafts}
+            onDraftChange={(key, value) => setReportDrafts((previous) => ({ ...previous, [key]: value }))}
             copiedReport={copiedReport}
             selectedReportId={selectedReportId}
             setCopiedReport={setCopiedReport}
@@ -1152,13 +938,15 @@ function App() {
         )}
         {activePanel === "practice" && (
           <PracticePanel
-            generated={generated}
+            generated={generated?.questionId === selectedQuestionId ? generated.items : []}
             question={selectedQuestion}
             onGeneratePractice={handleGeneratePractice}
           />
         )}
         {activePanel === "student" && (
           <StudentPanel
+            followUpTasks={studentFollowUps[selectedStudentId] ?? []}
+            onFollowUpChange={(tasks) => setStudentFollowUps((previous) => ({ ...previous, [selectedStudentId]: tasks }))}
             students={students}
             selectedStudentId={selectedStudentId}
             setSelectedStudentId={setSelectedStudentId}
@@ -1241,13 +1029,18 @@ function UploadPanel({
     missingClassRows: 0,
     missingIdentityRows: 0,
     missingScoreCells: 0,
+    invalidScoreCells: 0,
+    totalMismatchRows: 0,
+    unconfirmedColumns: [],
+    issues: [],
     totalScoreCells: liveSummary ? liveSummary.rowCount * liveSummary.scoreColumns.length : 0,
     validScoreCells: liveSummary ? liveSummary.rowCount * liveSummary.scoreColumns.length : 0,
   };
   const qualityNeedsReview = !!liveSummary && (
     liveQuality.coverage < 0.95 ||
     liveQuality.duplicateRows > 0 ||
-    liveQuality.missingIdentityRows > 0
+    liveQuality.missingIdentityRows > 0 || liveQuality.missingClassRows > 0 ||
+    liveQuality.invalidScoreCells > 0 || liveQuality.totalMismatchRows > 0 || liveQuality.unconfirmedColumns.length > 0
   );
 
   return (
@@ -1460,6 +1253,13 @@ function UploadPanel({
                   <small>缺姓名 {liveQuality.missingIdentityRows} · 缺班级 {liveQuality.missingClassRows}</small>
                 </div>
               </div>
+              <div className="data-quality-details" role="status">
+                <span>异常得分 <b>{liveQuality.invalidScoreCells}</b></span>
+                <span>总分口径差异 <b>{liveQuality.totalMismatchRows}</b></span>
+                <span>满分待确认 <b>{liveQuality.unconfirmedColumns.length}</b></span>
+              </div>
+              {liveQuality.issues.length > 0 && <ul className="quality-issues">{liveQuality.issues.slice(0, 6).map((issue, index) => <li key={index}>第 {issue.row} 行 · {issue.field}：{issue.message}</li>)}</ul>}
+              {liveQuality.unconfirmedColumns.length > 0 && <p>请在自定义得分表头标注“满分10”等满分信息：{liveQuality.unconfirmedColumns.join("、")}。</p>}
               <p>
                 {qualityNeedsReview
                   ? "已保留可分析记录；建议先核对黄色提示项，避免把缺失数据误判为学生失分。"
@@ -1476,17 +1276,17 @@ function UploadPanel({
               />
               <MetricCard
                 icon={Target}
-                label="平均得分"
+                label="有效小题均分"
                 tone="green"
-                value={`${liveSummary.averageTotal.toFixed(1)}/${liveSummary.maxTotal}`}
-                trend={`达成率 ${percent(liveSummary.averageRate)}`}
+                value={liveSummary.averageTotal === null ? "暂无得分" : `${liveSummary.averageTotal.toFixed(1)}分`}
+                trend={`有效作答 ${liveSummary.scoredStudents}人 · 有效题达成率 ${percent(liveSummary.averageRate)}`}
               />
               <MetricCard
                 icon={AlertTriangle}
                 label="需跟进"
                 tone="red"
                 value={`${liveSummary.riskCount}人`}
-                trend="低于60%或薄弱项较多"
+                trend="仅统计有有效得分的学生"
               />
               <MetricCard
                 icon={ClipboardCheck}
@@ -1536,7 +1336,7 @@ function UploadPanel({
                 <div className="live-preview-row" key={`${student.id}-${index}`}>
                   <strong>{student.displayName}</strong>
                   <span>{student.className}</span>
-                  <span>{student.total.toFixed(1)}</span>
+                  <span>{student.total === null ? "未评分" : student.total.toFixed(1)}</span>
                   <b>{student.weakItems.length}项</b>
                 </div>
               ))}
@@ -1877,7 +1677,9 @@ function DiagnosisPanel({
 }) {
   const wrongAttempts = attempts.filter((attempt) => attempt.questionId === question.id && !attempt.isCorrect);
   const rightAttempts = attempts.filter((attempt) => attempt.questionId === question.id && attempt.isCorrect);
-  const wrongRate = attempts.length ? wrongAttempts.length / attempts.length : 0;
+  const questionAttemptCount = wrongAttempts.length + rightAttempts.length;
+  const wrongRate = questionAttemptCount ? wrongAttempts.length / questionAttemptCount : null;
+  const correctRate = questionAttemptCount ? rightAttempts.length / questionAttemptCount : null;
   const optionRows =
     question.id === "q3"
       ? optionMisconceptions
@@ -1901,7 +1703,7 @@ function DiagnosisPanel({
   return (
     <div className="diagnosis-layout">
       <section className="panel question-picker">
-        <PanelHeader icon={ClipboardList} title="题目列表" action={assignment.title} />
+        <PanelHeader icon={ClipboardList} title="题目列表" action="题库参考正确率 · 非班级统计" />
         <div className="chip-list vertical">
           {questions.map((item) => (
             <button
@@ -1938,8 +1740,8 @@ function DiagnosisPanel({
           </div>
           <div className="diagnosis-card">
             <span>错误比例</span>
-            <strong>{percent(wrongRate || 1 - question.correctRate)}</strong>
-            <small>主要误选：{question.topWrongOption}</small>
+            <strong>{percent(wrongRate)}</strong>
+            <small>{questionAttemptCount} 份本题作答 · 主要误选：{question.topWrongOption}</small>
           </div>
           <div className="diagnosis-card">
             <span>平均用时</span>
@@ -1949,13 +1751,14 @@ function DiagnosisPanel({
         </div>
 
         <div className="reason-block">
-          <PanelHeader icon={SearchCheck} title="错误原因分析" action="题型 + 错因 + 证据" />
+          <PanelHeader icon={SearchCheck} title="错误原因分析" action="可能错因 · 待教师复核" />
           <div className="tag-row">
             {question.diagnosis.causes.map((cause) => (
               <span className="tag" key={cause}>{cause}</span>
             ))}
           </div>
-          <p>{question.diagnosis.evidence}</p>
+          <p className="question-response-evidence">{questionAttemptCount ? `当前筛选范围：${questionAttemptCount} 份本题作答，${rightAttempts.length} 份正确、${wrongAttempts.length} 份错误。` : "当前筛选范围暂无本题作答记录。"}</p>
+          <small>以下为题库错因假设，待教师结合原文和学生解释复核。</small>
           <p>{question.diagnosis.narrative}</p>
         </div>
 
@@ -1965,7 +1768,7 @@ function DiagnosisPanel({
         </div>
 
         <div className="option-analysis">
-          <PanelHeader icon={Brain} title="误选项与学生误区" action="选项级 item analysis" />
+          <PanelHeader icon={Brain} title="误选项与学生误区" action="讲评示例 · 非本班选项统计" />
           <div className="option-list">
             {optionRows.map((row) => (
               <article className="option-row" key={row.option}>
@@ -2003,10 +1806,10 @@ function DiagnosisPanel({
           <div
             className="donut"
             style={{
-              background: `conic-gradient(#2563eb 0 ${question.correctRate * 360}deg, #f59e0b ${question.correctRate * 360}deg 360deg)`,
+              background: `conic-gradient(#6951d5 0 ${(correctRate ?? 0) * 360}deg, #e7be65 ${(correctRate ?? 0) * 360}deg 360deg)`,
             }}
           >
-            <span>{percent(question.correctRate)}</span>
+            <span>{percent(correctRate)}</span>
           </div>
           <div className="legend-list">
             <span><i className="blue" />正确</span>
@@ -2035,15 +1838,17 @@ const classCompareData = classSnapshots.map((snapshot) => ({
   写作达成: Math.round((snapshot.writingScore / 40) * 100),
 }));
 
-function AnalyticsPanel() {
-  const [warningStatusMap, setWarningStatusMap] = useState<Record<string, WarningStatus>>(() =>
-    Object.fromEntries(warningCases.map((item) => [item.student, item.status])),
-  );
+function AnalyticsPanel({ warningStatusMap, onWarningChange, assignedMasteryTasks, onAssignTask }: {
+  warningStatusMap: Record<string, WarningStatus>;
+  onWarningChange: (student: string, status: WarningStatus) => void;
+  assignedMasteryTasks: string[];
+  onAssignTask: (key: string) => void;
+}) {
   const [copiedAnalyticsText, setCopiedAnalyticsText] = useState("");
+  const [analyticsCopyError, setAnalyticsCopyError] = useState("");
   const [masteryFilter, setMasteryFilter] = useState<"all" | "attention" | "stable">("all");
   const [selectedMasteryStudent, setSelectedMasteryStudent] = useState(masteryMatrix[0].student);
   const [selectedMasterySkill, setSelectedMasterySkill] = useState<(typeof masteryMatrixSkills)[number]>("词汇语境");
-  const [assignedMasteryTask, setAssignedMasteryTask] = useState("");
 
   const getMasteryRows = (filter: "all" | "attention" | "stable") => masteryMatrix.filter((row) => {
     const values = Object.values(row.values);
@@ -2066,21 +1871,24 @@ function AnalyticsPanel() {
       masteryMatrixSkills[0]);
       setSelectedMasteryStudent(nextRows[0].student);
       setSelectedMasterySkill(weakestSkill);
-      setAssignedMasteryTask("");
     }
   };
 
   const cycleWarningStatus = (student: string) => {
-    setWarningStatusMap((prev) => {
-      const current = prev[student] ?? "未处理";
-      const next = warningStatusFlow[(warningStatusFlow.indexOf(current) + 1) % warningStatusFlow.length];
-      return { ...prev, [student]: next };
-    });
+    const current = warningStatusMap[student] ?? "未处理";
+    onWarningChange(student, warningStatusFlow[(warningStatusFlow.indexOf(current) + 1) % warningStatusFlow.length]);
   };
 
-  const handleCopyAnalytics = (kind: string, text: string) => {
-    void navigator.clipboard?.writeText(text);
-    setCopiedAnalyticsText(kind);
+  const handleCopyAnalytics = async (kind: string, text: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      setCopiedAnalyticsText(kind);
+      setAnalyticsCopyError("");
+    } catch {
+      setCopiedAnalyticsText("");
+      setAnalyticsCopyError("未能复制，请使用下载按钮。");
+    }
   };
 
   const lessonPlanText = `讲评课备课单（40分钟）\n\n${reviewLessonPlan
@@ -2218,7 +2026,6 @@ function AnalyticsPanel() {
                         onClick={() => {
                           setSelectedMasteryStudent(row.student);
                           setSelectedMasterySkill(skill);
-                          setAssignedMasteryTask("");
                         }}
                         type="button"
                       >
@@ -2254,11 +2061,12 @@ function AnalyticsPanel() {
             </dl>
             <button
               className="primary-button"
-              onClick={() => setAssignedMasteryTask(selectedMasteryKey)}
+              onClick={() => onAssignTask(selectedMasteryKey)}
+              aria-pressed={assignedMasteryTasks.includes(selectedMasteryKey)}
               type="button"
             >
               <Send size={15} />
-              {assignedMasteryTask === selectedMasteryKey ? "已加入跟进清单" : "加入跟进清单"}
+              {assignedMasteryTasks.includes(selectedMasteryKey) ? "已加入跟进清单" : "加入跟进清单"}
             </button>
           </aside>
         </div>
@@ -2352,6 +2160,7 @@ function AnalyticsPanel() {
 
       <section className="panel lesson-plan-panel">
         <PanelHeader icon={ClipboardCheck} title="讲评课备课单" action="课前-课中-课后闭环" />
+        {analyticsCopyError && <p role="status">{analyticsCopyError}</p>}
         <div className="panel-inline-actions">
           <button
             className="secondary-button"
@@ -2401,6 +2210,7 @@ function AnalyticsPanel() {
 
       <section className="panel report-preview-panel full">
         <PanelHeader icon={Download} title="周报与家校沟通预览" action="可复制 · 可导出" />
+        {analyticsCopyError && <p role="status">{analyticsCopyError}</p>}
         <div className="panel-inline-actions">
           <button
             className="secondary-button"
@@ -2434,11 +2244,19 @@ function AnalyticsPanel() {
 }
 
 function ReportsPanel({
+  drafts,
+  onDraftChange,
+  selectedTone,
+  setSelectedTone,
   copiedReport,
   selectedReportId,
   setCopiedReport,
   setSelectedReportId,
 }: {
+  drafts: Record<string, string>;
+  onDraftChange: (key: string, value: string) => void;
+  selectedTone: ReportTone;
+  setSelectedTone: (tone: ReportTone) => void;
   copiedReport: string;
   selectedReportId: string;
   setCopiedReport: (value: string) => void;
@@ -2446,16 +2264,22 @@ function ReportsPanel({
 }) {
   const selectedReport =
     reportTemplates.find((item) => item.id === selectedReportId) ?? reportTemplates[0];
-  const [selectedTone, setSelectedTone] = useState<ReportTone>(selectedReport.tone);
+  const [editing, setEditing] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const toneOptions: ReportTone[] = ["正式", "简洁", "鼓励"];
   const variant = selectedReport.tones[selectedTone];
-  const reportText = `${selectedReport.title}（${selectedReport.audience} · ${selectedTone}语气）\n\n${variant.body}\n\n${variant.bullets
-    .map((item) => `- ${item}`)
-    .join("\n")}`;
+  const draftKey = `${selectedReport.id}:${selectedTone}`;
+  const defaultBody = `${variant.body}\n\n${variant.bullets.map((item) => `- ${item}`).join("\n")}`;
+  const draft = drafts[draftKey] ?? defaultBody;
+  const reportText = `${selectedReport.title}（${selectedReport.audience} · ${selectedTone}语气）\n\n${draft}`;
 
-  const handleCopy = () => {
-    void navigator.clipboard?.writeText(reportText);
-    setCopiedReport(selectedReport.id);
+  const handleCopy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(reportText);
+      setCopiedReport(reportText);
+      setCopyError("");
+    } catch { setCopyError("未能复制，请下载 Markdown 或手动选择正文。"); }
   };
 
   const handleSelectReport = (id: string) => {
@@ -2511,7 +2335,7 @@ function ReportsPanel({
         <div className="report-toolbar">
           <button className="primary-button" onClick={handleCopy} type="button">
             <ClipboardCheck size={16} />
-            {copiedReport === selectedReport.id ? "已复制" : "复制报告"}
+            {copiedReport === reportText ? "已复制" : "复制报告"}
           </button>
           <button className="secondary-button" onClick={handleDownload} type="button">
             <Download size={16} />
@@ -2521,6 +2345,9 @@ function ReportsPanel({
             <Printer size={16} />
             打印 / 存 PDF
           </button>
+          <button className="secondary-button" type="button" aria-pressed={editing} onClick={() => setEditing(!editing)}>
+            <PencilLine size={16} aria-hidden="true" />{editing ? "完成编辑" : "编辑报告"}
+          </button>
           <div className="tone-switch" role="group" aria-label="改写语气">
             <Sparkles size={14} />
             {toneOptions.map((tone) => (
@@ -2528,6 +2355,7 @@ function ReportsPanel({
                 className={selectedTone === tone ? "tone-chip active" : "tone-chip"}
                 key={tone}
                 onClick={() => setSelectedTone(tone)}
+                aria-pressed={selectedTone === tone}
                 type="button"
               >
                 {tone}
@@ -2535,15 +2363,11 @@ function ReportsPanel({
             ))}
           </div>
         </div>
+        {copyError && <p role="status">{copyError}</p>}
         <article className="report-document">
-          <span>AI 初稿 · {selectedTone}语气 · 老师可编辑</span>
+          <span>{drafts[draftKey] !== undefined ? "教师修改稿" : "示例报告"} · {selectedTone}语气 · 当前页面暂存</span>
           <h2>{selectedReport.title}</h2>
-          <p>{variant.body}</p>
-          <ul>
-            {variant.bullets.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          {editing ? <textarea className="report-draft-input" aria-label="报告正文" maxLength={12000} value={draft} onChange={(event) => onDraftChange(draftKey, event.target.value)} /> : <p className="report-draft-preview">{draft}</p>}
         </article>
       </section>
 
@@ -2610,10 +2434,18 @@ function ImaAssistantPanel({
     question,
   });
   const knowledgePrompt = buildImaKnowledgePrompt();
+  const [imaCopyError, setImaCopyError] = useState("");
 
-  const handleCopy = (kind: "summary" | "knowledge", text: string) => {
-    void navigator.clipboard?.writeText(text);
-    setCopiedImaText(kind);
+  const handleCopy = async (_kind: "summary" | "knowledge", text: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      setCopiedImaText(text);
+      setImaCopyError("");
+    } catch {
+      setCopiedImaText("");
+      setImaCopyError("未能复制，请手动选择下方文本。");
+    }
   };
 
   const knowledgeCards = [
@@ -2669,7 +2501,7 @@ function ImaAssistantPanel({
               type="button"
             >
               <ClipboardCheck size={16} />
-              {copiedImaText === "summary" ? "已复制学情摘要" : "复制学情摘要"}
+              {copiedImaText === learningSummary ? "已复制学情摘要" : "复制学情摘要"}
             </button>
             <button
               className="secondary-button"
@@ -2677,11 +2509,12 @@ function ImaAssistantPanel({
               type="button"
             >
               <Sparkles size={16} />
-              {copiedImaText === "knowledge" ? "已复制提示词" : "复制知识库提示词"}
+              {copiedImaText === knowledgePrompt ? "已复制提示词" : "复制知识库提示词"}
             </button>
           </div>
         </div>
         <div className="ima-privacy-card">
+          {imaCopyError && <p role="status">{imaCopyError}</p>}
           <ShieldCheck size={22} />
           <strong>API边界</strong>
           <p>DeepSeek Key 只保存在当前页面内存；点击生成时才会把匿名学情摘要发送到 DeepSeek。未填 Key 时自动使用本地演示结果。</p>
@@ -2899,6 +2732,8 @@ function PracticePanel({
 }
 
 function StudentPanel({
+  followUpTasks,
+  onFollowUpChange,
   students,
   selectedStudentId,
   setSelectedStudentId,
@@ -2906,6 +2741,8 @@ function StudentPanel({
   wrongAttempts,
   questions,
 }: {
+  followUpTasks: string[];
+  onFollowUpChange: (tasks: string[]) => void;
   students: StudentAttempt[];
   selectedStudentId: string;
   setSelectedStudentId: (id: string) => void;
@@ -2917,16 +2754,18 @@ function StudentPanel({
     ? Math.round(attempts.reduce((sum, attempt) => sum + attempt.mastery, 0) / attempts.length)
     : 0;
   const selectedStudent = students.find((student) => student.studentId === selectedStudentId);
-  const profile =
-    studentProgressProfiles.find((item) => item.studentId === selectedStudentId) ??
-    studentProgressProfiles.find((item) => item.studentId === "s2") ??
-    studentProgressProfiles[0];
+  const savedProfile = studentProgressProfiles.find((item) => item.studentId === selectedStudentId);
+  const profile = savedProfile ?? {
+    phase: "待建立跟踪", riskLevel: "待评估", summary: "暂无该学生的长期跟踪档案；下方仅展示本次作答记录，不套用其他学生的历史数据。",
+    focusSkills: [...new Set(wrongAttempts.map((attempt) => questions.find((question) => question.id === attempt.questionId)?.questionType).filter((skill): skill is NonNullable<typeof skill> => !!skill))],
+    nextReview: "待教师安排", progressTrend: [], framework: [], trackers: [],
+  };
   const riskTone =
-    profile.riskLevel === "高" ? "high" : profile.riskLevel === "中" ? "medium" : "low";
+    profile.riskLevel === "高" ? "high" : profile.riskLevel === "中" ? "medium" : profile.riskLevel === "低" ? "low" : "unknown";
   const statusClass = (status: string) =>
     status === "已完成" ? "done" : status === "进行中" ? "active" : "pending";
-  const [followUpTasks, setFollowUpTasks] = useState<string[]>([]);
-  const [copiedMistakeBook, setCopiedMistakeBook] = useState(false);
+  const [copiedMistakeBook, setCopiedMistakeBook] = useState("");
+  const [studentCopyError, setStudentCopyError] = useState("");
 
   const handleGenerateFollowUp = () => {
     const skillTasks = profile.focusSkills.slice(0, 3).map(
@@ -2938,7 +2777,7 @@ function StudentPanel({
         const question = questions.find((item) => item.id === attempt.questionId);
         return `订正：Q${question?.number ?? "?"} ${question?.questionType ?? ""}（错因：${attempt.cause}），写出正确答案的原文依据。`;
       });
-    setFollowUpTasks([...skillTasks, ...correctionTasks, `复盘：${profile.nextReview}，目标正确率 80% 以上。`]);
+    onFollowUpChange([...skillTasks, ...correctionTasks, `复盘：${profile.nextReview}，目标与时间由教师确认。`]);
   };
 
   const buildMistakeBookText = () => {
@@ -2983,7 +2822,7 @@ function StudentPanel({
         <div className="metric-grid compact">
           <MetricCard icon={Target} label="掌握度" tone="blue" value={`${averageMastery}%`} trend="个人画像" />
           <MetricCard icon={AlertTriangle} label="错题数" tone="red" value={`${wrongAttempts.length}`} trend="需订正" />
-          <MetricCard icon={ShieldCheck} label="跟踪等级" tone={riskTone === "high" ? "red" : riskTone === "medium" ? "orange" : "green"} value={profile.riskLevel} trend={profile.phase} />
+          <MetricCard icon={ShieldCheck} label="跟踪等级" tone={riskTone === "high" ? "red" : riskTone === "medium" ? "orange" : riskTone === "low" ? "green" : "blue"} value={profile.riskLevel} trend={profile.phase} />
         </div>
 
         <section className="panel student-profile-hero">
@@ -3002,7 +2841,7 @@ function StudentPanel({
             </div>
           </div>
           <div className="profile-review-card">
-            <span className={`risk-badge ${riskTone}`}>{profile.riskLevel}风险</span>
+            <span className={`risk-badge ${riskTone}`}>{savedProfile ? `${profile.riskLevel}风险` : "待评估"}</span>
             <strong>{profile.phase}</strong>
             <small>下一次复盘：{profile.nextReview}</small>
             <button className="ghost-button" onClick={handleGenerateFollowUp} type="button">
@@ -3014,7 +2853,7 @@ function StudentPanel({
 
         {followUpTasks.length > 0 && (
           <section className="panel follow-up-panel">
-            <PanelHeader icon={ClipboardList} title="AI 跟进任务草稿" action="老师可编辑后布置" />
+            <PanelHeader icon={ClipboardList} title="跟进任务草稿" action="本地规则生成 · 待教师复核" />
             <ol className="follow-up-list">
               {followUpTasks.map((task) => (
                 <li key={task}>{task}</li>
@@ -3038,7 +2877,7 @@ function StudentPanel({
         <div className="student-progress-grid">
           <section className="panel">
             <PanelHeader icon={LineChart} title="个人学习进度曲线" action="按周跟踪" />
-            <div className="chart-box student-chart">
+            {profile.progressTrend.length > 0 ? <div className="chart-box student-chart">
               <ResponsiveContainer width="100%" height={250} initialDimension={{ width: 320, height: 250 }}>
                 <ReLineChart data={profile.progressTrend} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -3052,12 +2891,13 @@ function StudentPanel({
                   <Line type="monotone" dataKey="综合" stroke="#0f766e" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
                 </ReLineChart>
               </ResponsiveContainer>
-            </div>
+            </div> : <div className="empty-state"><strong>暂无历史测验记录</strong><span>累计多次测验后再展示学习趋势。</span></div>}
           </section>
 
           <section className="panel">
             <PanelHeader icon={ClipboardList} title="学习进度框架图" action="诊断-干预-跟踪-调整" />
             <div className="framework-map">
+              {!profile.framework.length && <p className="empty-state">暂无已确认的干预计划</p>}
               {profile.framework.map((step, index) => (
                 <article className={`framework-step ${statusClass(step.status)}`} key={step.stage}>
                   <span className="step-index">{index + 1}</span>
@@ -3074,6 +2914,7 @@ function StudentPanel({
         <section className="panel tracking-panel">
           <PanelHeader icon={Activity} title="学生学情跟踪板" action="过程证据 + 下一步" />
           <div className="tracking-board">
+            {!profile.trackers.length && <p className="empty-state">暂无跟踪记录</p>}
             {profile.trackers.map((item) => (
               <article className="tracker-row" key={`${item.date}-${item.task}`}>
                 <div className="tracker-date">{item.date}</div>
@@ -3089,9 +2930,10 @@ function StudentPanel({
         </section>
 
         <section className="panel task-closure-panel">
-          <PanelHeader icon={ClipboardCheck} title="本周任务闭环" action="布置-完成-反馈-再测" />
+          <PanelHeader icon={ClipboardCheck} title="本周任务闭环" action="流程示例 · 非个人完成记录" />
           <div className="task-closure-grid">
-            {studentTaskClosures.map((item) => (
+            {!savedProfile && <p className="empty-state">暂无已分配的个人任务</p>}
+            {(savedProfile ? studentTaskClosures : []).map((item) => (
               <article className={`task-closure-card ${statusClass(item.status)}`} key={item.label}>
                 <span>{item.status}</span>
                 <strong>{item.label}</strong>
@@ -3106,14 +2948,19 @@ function StudentPanel({
           <div className="panel-inline-actions">
             <button
               className="secondary-button"
-              onClick={() => {
-                void navigator.clipboard?.writeText(buildMistakeBookText());
-                setCopiedMistakeBook(true);
+              onClick={async () => {
+                const text = buildMistakeBookText();
+                try {
+                  if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+                  await navigator.clipboard.writeText(text);
+                  setCopiedMistakeBook(text);
+                  setStudentCopyError("");
+                } catch { setStudentCopyError("未能复制，请使用导出打印版。"); }
               }}
               type="button"
             >
               <ClipboardCheck size={16} />
-              {copiedMistakeBook ? "已复制错题本" : "复制错题本"}
+              {copiedMistakeBook === buildMistakeBookText() ? "已复制错题本" : "复制错题本"}
             </button>
             <button
               className="secondary-button"
@@ -3130,6 +2977,7 @@ function StudentPanel({
               导出打印版
             </button>
           </div>
+          {studentCopyError && <p role="status">{studentCopyError}</p>}
           <div className="mistake-list">
             {wrongAttempts.length ? (
               wrongAttempts.map((attempt) => {

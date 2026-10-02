@@ -270,6 +270,7 @@ const studentNames = [
   "S10 何同学",
   "S11 罗同学",
   "S12 梁同学",
+  "S13 全对样例",
 ];
 
 const causes: ErrorCause[] = [
@@ -288,7 +289,7 @@ const buildAttempts = (): StudentAttempt[] =>
   studentNames.flatMap((studentName, studentIndex) =>
     assignments[0].questions.map((question, questionIndex) => {
       const pattern = (studentIndex * 17 + questionIndex * 23) % 100;
-      const isCorrect = pattern / 100 < question.correctRate;
+      const isCorrect = studentIndex === 12 || pattern / 100 < question.correctRate;
       return {
         studentId: `s${studentIndex + 1}`,
         studentName,
@@ -297,7 +298,7 @@ const buildAttempts = (): StudentAttempt[] =>
         selected: isCorrect ? question.answer : question.topWrongOption,
         isCorrect,
         timeSpent: Math.round(question.averageTime + ((pattern % 7) - 3) * 9),
-        mastery: Math.max(34, Math.min(96, Math.round(question.correctRate * 100 + (isCorrect ? 8 : -18) + (studentIndex % 4) * 3))),
+        mastery: studentIndex === 12 ? 96 : Math.max(34, Math.min(96, Math.round(question.correctRate * 100 + (isCorrect ? 8 : -18) + (studentIndex % 4) * 3))),
         cause: isCorrect ? "时间策略" : causes[(studentIndex + questionIndex) % causes.length],
       };
     }),
@@ -603,7 +604,7 @@ export const masteryMatrix = [
     values: { 信息定位: 88, 推断概括: 76, 词汇语境: 81, 篇章逻辑: 75, 综合读写: 80 },
   },
   {
-    student: "S05 周同学",
+    student: "S05 张同学",
     risk: "低风险",
     change: "+8%",
     summary: "整体表现稳定，可作为同伴讲解样例并保持限时训练。",
