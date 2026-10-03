@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Test external AI privacy boundaries
+      - name: Test local-only privacy boundaries
         run: npm run test:security
 
       - name: Test imported score calculations

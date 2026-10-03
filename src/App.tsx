@@ -1,6 +1,6 @@
 import { useLocale } from "./i18n/LocaleContext";
 import { sampleCsvForLocale, sampleEssaysForLocale } from "./i18n/sampleData";
-import { chartLabel, type Locale } from "./i18n/translate";
+import { chartLabel } from "./i18n/translate";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -85,10 +85,6 @@ import {
 } from "./data/mockData";
 import type { ReportTone, WarningStatus } from "./data/mockData";
 import {
-  DEEPSEEK_API_URL,
-  normalizeDeepSeekModel,
-  normalizeTemporaryApiKey,
-  redactSensitiveText,
   safeAggregateMetricLabel,
 } from "./security";
 import type { PracticeItem, QuestionItem, StudentAttempt } from "./types";
@@ -118,7 +114,7 @@ const teacherNav = [
   { id: "diagnosis", label: "错因", icon: SearchCheck },
   { id: "analytics", label: "学情", icon: BarChart3 },
   { id: "reports", label: "报告", icon: FileText },
-  { id: "ima", label: "ima助手", icon: Brain },
+  { id: "ima", label: "备课助手", icon: Brain },
   { id: "practice", label: "练习", icon: BookOpenCheck },
 ] satisfies Array<{ id: PanelId; label: string; icon: typeof LayoutDashboard }>;
 
@@ -146,8 +142,7 @@ D. To explain the need for a more efficient system.`;
 
 const percent = (value: number | null) => value === null ? "暂无数据" : `${Math.round(value * 100)}%`;
 
-type DeepSeekStatus = "idle" | "ready" | "loading" | "success" | "error";
-type DeepSeekState = { status: DeepSeekStatus; message: string; result: string };
+type EssayReviewState = { status: "idle" | "ready" | "error"; message: string; result: string };
 
 const analyzeLiveData = (text: string) => parseLiveData(text, liveQuestionGuide);
 const aggregateWeakItemLabel = (item: LiveWeakItem, index: number) =>
@@ -240,13 +235,6 @@ const buildImaKnowledgePrompt = () =>
     "5. 哪些数据不应该上传，以保护学生隐私",
   ].join("\n");
 
-const deepSeekFallbackText = [
-  "【本地回退结果】",
-  "1. 先用最低正确率题目做 8-12 分钟错因讲评，要求学生说出原文证据和排除理由。",
-  "2. 按错因分组：词汇语境组补语义场迁移，篇章逻辑组做段落功能标注，长难句组做主干-修饰-指代拆解。",
-  "3. 课后推送 2 道同类题，并要求上传订正证据；下次课前用 5 分钟再测核验。",
-].join("\n");
-
 const demoEssayText = `Paragraph continuation task:
 When the last bus left, Li Hua found a small blue notebook on the bench. The rain was getting heavier, and the owner might be very worried.
 
@@ -264,112 +252,6 @@ const essayCorrectionFallbackText = [
   "3. 衔接连贯：Because / Twenty minutes later 使用自然，可增加 Meanwhile / To his relief 等衔接语。",
   "4. 教学启示：本题适合训练“情节链 + 情绪线 + 价值升华”，课上可让学生先圈出原文伏笔，再写两句动作描写和一句心理描写。",
 ].join("\n");
-
-const essayRubricPromptText = writingRubricStandards
-  .map((standard) => {
-    const dimensions = standard.dimensions
-      .map((dimension) => `${dimension.name}${dimension.weight}分：${dimension.criteria}`)
-      .join("；");
-    const bands = standard.bands
-      .map((band) => `${band.label}${band.scoreRange}：${band.descriptor}`)
-      .join("；");
-    return `${standard.title}（${standard.examUse}）：${standard.summary}\n维度：${dimensions}\n分档：${bands}`;
-  })
-  .join("\n\n");
-
-const buildEssayCorrectionPrompt = ({
-  className,
-  essayText,
-}: {
-  className: string;
-  essayText: string;
-}) =>
-  [
-    "你是广东高中英语教师，请按高考英语应用文/读后续写批改口径，给老师一个可直接展示的作文批改结果。",
-    "",
-    "【隐私边界】",
-    "只批改文本本身，不推断学生身份，不编造学生个人信息。",
-    "",
-    "【班级/场景】",
-    className,
-    "",
-    "【评分标准库】",
-    essayRubricPromptText,
-    "",
-    "【请输出】",
-    "1. 总体评价：一句话说明优势和主要短板。",
-    "2. 建议得分：按 40 分制给出分数，并说明扣分理由。",
-    "3. 分项诊断：内容完成度、结构连贯、语言准确性、词汇句式、读后续写情节/应用文交际目的。",
-    "4. 逐句或片段批注：列出 3-5 个最值得改的原句、问题、修改建议。",
-    "5. 修改示范：给出一个更自然的改写版本，不要太长。",
-    "6. 同类迁移练习：给学生 2 个可马上练的微任务。",
-    "7. 教学启示：给老师 2 条教考衔接建议，聚焦高中英语核心素养和高考写作能力。",
-    "",
-    "【学生作文/文章】",
-    essayText,
-  ].join("\n");
-
-const buildDeepSeekPrompt = ({
-  className,
-  classSnapshot,
-  liveSummary,
-  question,
-  mode,
-  locale,
-}: {
-  className: string;
-  classSnapshot: (typeof classSnapshots)[number];
-  liveSummary: LiveDataSummary | null;
-  question: QuestionItem;
-  mode: "teaching" | "practice" | "report";
-  locale: Locale;
-}) => {
-  const liveSummaryLines = liveSummary
-    ? [
-        `真实数据本地解析：${liveSummary.rowCount}名学生，平均达成率${percent(liveSummary.averageRate)}，需跟进${liveSummary.riskCount}人。`,
-        `薄弱题：${liveSummary.weakItems.map((item, index) => `${aggregateWeakItemLabel(item, index)}(${item.type}, ${item.cause}, 达成率${percent(item.averageRate)})`).join("；")}`,
-        `高频错因：${liveSummary.causeCounts.map((item) => `${item.cause}${item.count}次`).join("；")}`,
-      ]
-    : ["暂未导入真实成绩表，请基于模拟班级概况输出。"];
-
-  const task =
-    mode === "practice"
-      ? "请生成 3 道同类迁移练习，每道题包含题干、选项、答案、错因提示和讲评要点。"
-      : mode === "report"
-        ? "请生成一段可给备课组/校长看的简洁学情说明，包含发现、证据、下一步教学动作。"
-        : "请生成下一节课 15 分钟讲评与分层练习建议，必须体现教考衔接。";
-
-  return [
-    "你是广东高中英语备课组的教研助手。请只基于以下匿名学情摘要输出，不编造学生个人隐私。",
-    "",
-    "【任务】",
-    task,
-    "",
-    "【输出格式】",
-    locale === "en"
-      ? "Respond in natural English under these headings: Key finding, Classroom action, Differentiated practice, Follow-up evidence. Keep each point concise and useful for a teacher's lesson plan."
-      : "用中文，分为：核心判断、课堂动作、分层练习、跟踪证据。每点尽量短，适合老师直接复制到备课记录。",
-    "",
-    "【班级概况】",
-    `范围：${className}`,
-    `班级平均正确率：${percent(classSnapshot.averageAccuracy)}`,
-    `完成率：${percent(classSnapshot.completionRate)}`,
-    `写作均分：${classSnapshot.writingScore}/40`,
-    `需跟进学生数：${classSnapshot.riskStudents}人`,
-    "",
-    "【重点错题】",
-    `题号：Q${question.number}`,
-    `题型：${question.questionType}`,
-    `主题：${question.passageTheme}`,
-    `正确率：${percent(question.correctRate)}`,
-    `主要误选：${question.topWrongOption}`,
-    `错因标签：${question.diagnosis.causes.join(" / ")}`,
-    `诊断叙述：${question.diagnosis.narrative}`,
-    "",
-    "【真实数据摘要】",
-    ...liveSummaryLines,
-  ].join("\n");
-};
 
 function App() {
   const { t, locale, setLocale } = useLocale();
@@ -429,33 +311,22 @@ function App() {
   const [liveSummary, setLiveSummary] = useState<LiveDataSummary | null>(() =>
     analyzeLiveData(sampleCsvForLocale(locale)),
   );
-  const [liveMessage, setLiveMessage] = useState("已载入深圳高中英语样例数据，可直接替换为老师自己的表格。");
-  const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
-  const [deepSeekModel, setDeepSeekModel] = useState(() =>
-    normalizeDeepSeekModel(typeof window === "undefined" ? "" : window.localStorage.getItem("deepseek_model")),
-  );
-  const [deepSeekState, setDeepSeekState] = useState<DeepSeekState>(() => ({
-    status: "idle",
-    message: "API Key 仅保留在当前页面内存中，刷新或关闭页面后自动清除。",
-    result: "",
-  }));
+  const [liveMessage, setLiveMessage] = useState("已载入高中英语样例数据，可直接替换为老师自己的表格。");
   const [essayText, setEssayText] = useState(demoEssayText);
   const [essayFileName, setEssayFileName] = useState("sample-story-continuation.txt");
-  const [essayCorrectionState, setEssayCorrectionState] = useState<DeepSeekState>({
+  const [essayCorrectionState, setEssayCorrectionState] = useState<EssayReviewState>({
     status: "idle",
-    message: "可粘贴作文或上传 txt/csv 文本；点击批改后生成反馈。",
+    message: "可粘贴作文或上传文本；本地显示样例点评或教师复核清单，不自动评分。",
     result: "",
   });
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.removeItem("deepseek_api_key");
+    // Remove legacy credentials left by older versions, without reading them.
+    try {
+      window.localStorage.removeItem("deepseek_api_key");
+      window.localStorage.removeItem("deepseek_model");
+    } catch { /* The demo also works when browser storage is unavailable. */ }
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("deepseek_model", deepSeekModel);
-  }, [deepSeekModel]);
 
   const selectedQuestion = useMemo(
     () =>
@@ -554,197 +425,31 @@ function App() {
     reader.readAsText(file, "utf-8");
   };
 
-  const requestDeepSeek = async (mode: "test" | "teaching" | "practice" | "report") => {
-    const suppliedKey = deepSeekApiKey.trim();
-    const key = normalizeTemporaryApiKey(suppliedKey);
-    const prompt = mode === "test"
-      ? (locale === "en" ? "Reply with one sentence: DeepSeek connection successful." : "请用一句中文回复：DeepSeek API 连接正常。")
-      : buildDeepSeekPrompt({
-          className: selectedClass,
-          classSnapshot,
-          liveSummary,
-          question: selectedQuestion,
-          mode,
-          locale,
-        });
-
-    if (suppliedKey && !key) {
-      setDeepSeekState({
-        status: "error",
-        message: "API Key 格式异常，未发送任何请求。请重新粘贴临时 Key。",
-        result: deepSeekFallbackText,
-      });
-      return;
-    }
-
-    if (!key) {
-      setDeepSeekState({
-        status: "ready",
-        message: "未填写 DeepSeek API Key，已使用本地回退结果；明天演示时可临时粘贴 Key 再测试。",
-        result: deepSeekFallbackText,
-      });
-      return;
-    }
-
-    setDeepSeekState({
-      status: "loading",
-      message: mode === "test" ? "正在测试 DeepSeek API 连接..." : "正在请求 DeepSeek 生成建议...",
-      result: deepSeekState.result,
-    });
-
-    try {
-      const response = await fetch(DEEPSEEK_API_URL, {
-        method: "POST",
-        cache: "no-store",
-        credentials: "omit",
-        mode: "cors",
-        referrerPolicy: "no-referrer",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: normalizeDeepSeekModel(deepSeekModel),
-          messages: [
-            {
-              role: "system",
-              content: locale === "en" ? "You support upper-secondary English teachers. Respond in natural English with concise, practical suggestions. Do not invent personal information about students." : "你是高中英语教研助手，回答要短、清楚、可落地，避免编造学生个人隐私。",
-            },
-            { role: "user", content: prompt },
-          ],
-          thinking: { type: "disabled" },
-          temperature: 0.4,
-          max_tokens: mode === "test" ? 80 : 900,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`DeepSeek API 请求失败（HTTP ${response.status}）`);
-      }
-
-      const payload = await response.json();
-      const content = payload?.choices?.[0]?.message?.content?.trim();
-      if (!content) throw new Error("DeepSeek 返回为空。");
-
-      setDeepSeekState({
-        status: "success",
-        message: mode === "test" ? "DeepSeek API 连接正常。" : "已由 DeepSeek 生成，可复制给老师讨论。",
-        result: content,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "未知错误";
-      setDeepSeekState({
-        status: "error",
-        message: `API 暂时不可用，已显示本地回退结果。原因：${message}`,
-        result: deepSeekFallbackText,
-      });
-    }
-  };
-
-  const requestEssayCorrection = async () => {
-    const suppliedKey = deepSeekApiKey.trim();
-    const key = normalizeTemporaryApiKey(suppliedKey);
+  const requestEssayCorrection = () => {
     const cleanEssay = essayText.trim();
-
-    if (cleanEssay.length < 60) {
+    if (cleanEssay.length < 60 || cleanEssay.length > MAX_ESSAY_CHARS) {
       setEssayCorrectionState({
         status: "error",
-        message: "请先粘贴一篇较完整的作文/续写文本，再进行批改。",
-        result: "至少建议输入 60 个以上字符；正式试用时可以直接复制学生作文原文到这里。",
+        message: "请提供 60 至 30000 个字符的作文文本。",
+        result: "",
       });
       return;
     }
-
-    if (cleanEssay.length > MAX_ESSAY_CHARS) {
-      setEssayCorrectionState({
-        status: "error",
-        message: "文本过长，未发送任何请求。请缩短后重试。",
-        result: essayCorrectionFallbackText,
-      });
-      return;
-    }
-
-    if (suppliedKey && !key) {
-      setEssayCorrectionState({
-        status: "error",
-        message: "API Key 格式异常，未发送任何请求。请重新粘贴临时 Key。",
-        result: essayCorrectionFallbackText,
-      });
-      return;
-    }
-
-    if (!key) {
-      setEssayCorrectionState({
-        status: "ready",
-        message: "未填写 DeepSeek API Key，已展示本地样例批改。填入 Key 后可批改真实文本。",
-        result: essayCorrectionFallbackText,
-      });
-      return;
-    }
-
+    const isSample = cleanEssay === demoEssayText.trim();
     setEssayCorrectionState({
-      status: "loading",
-      message: "正在请求 DeepSeek 批改作文...",
-      result: essayCorrectionState.result,
+      status: "ready",
+      message: isSample
+        ? "以下是内置作文的预设点评，不是真实自动评分。"
+        : "原文仅在本页暂存。此公开版不自动评分，请教师按量规复核。",
+      result: isSample ? essayCorrectionFallbackText : [
+        "【教师复核清单】",
+        "1. 内容：是否回应题目要求，是否有足够的文本证据。",
+        "2. 结构：段落组织、衔接和故事发展是否合理。",
+        "3. 语言：检查词汇使用、句法准确性与表达得体性。",
+        "4. 反馈：记录一项优势、一项待改进点和下一步练习。",
+        "未对当前文本生成分数、逐句批注或能力诊断。",
+      ].join("\n"),
     });
-
-    const privacySafeEssay = redactSensitiveText(cleanEssay);
-
-    try {
-      const response = await fetch(DEEPSEEK_API_URL, {
-        method: "POST",
-        cache: "no-store",
-        credentials: "omit",
-        mode: "cors",
-        referrerPolicy: "no-referrer",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: normalizeDeepSeekModel(deepSeekModel),
-          messages: [
-            {
-              role: "system",
-              content: locale === "en" ? "You review upper-secondary English writing. Respond in natural English with specific, measured and practical feedback. Preserve quoted student text. Do not invent personal information about students." : "你是高中英语作文批改与教研助手，输出要具体、克制、可落地，不编造学生隐私。",
-            },
-            {
-              role: "user",
-              content: buildEssayCorrectionPrompt({
-                className: selectedClass,
-                essayText: privacySafeEssay.text,
-              }),
-            },
-          ],
-          thinking: { type: "disabled" },
-          temperature: 0.35,
-          max_tokens: 1200,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`DeepSeek API 请求失败（HTTP ${response.status}）`);
-      }
-
-      const payload = await response.json();
-      const content = payload?.choices?.[0]?.message?.content?.trim();
-      if (!content) throw new Error("DeepSeek 返回为空。");
-
-      setEssayCorrectionState({
-        status: "success",
-        message: privacySafeEssay.redactionCount
-          ? `DeepSeek 已完成作文批改；发送前自动移除了 ${privacySafeEssay.redactionCount} 处显式个人标识。`
-          : "DeepSeek 已完成作文批改，可复制给老师讨论。",
-        result: content,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "未知错误";
-      setEssayCorrectionState({
-        status: "error",
-        message: `API 暂时不可用，已显示本地样例批改。原因：${message}`,
-        result: essayCorrectionFallbackText,
-      });
-    }
   };
 
   const panelTitle = {
@@ -754,7 +459,7 @@ function App() {
     diagnosis: "单题错因分析",
     analytics: "班级学情可视化",
     reports: "报告生成与导出",
-    ima: "DeepSeek / ima 助手",
+    ima: "备课摘要与提示词",
     practice: "拓展练习生成",
     student: "学生学情跟踪",
   }[activePanel];
@@ -874,7 +579,7 @@ function App() {
             questionText={questionText}
             onAnalyzeLiveCsv={handleAnalyzeLiveCsv}
             onClearLiveData={handleClearLiveData}
-            onDownloadLiveSample={() => downloadTextFile(sampleCsvForLocale(locale), `shenzhen-english-demo-sample-${locale}.csv`)}
+            onDownloadLiveSample={() => downloadTextFile(sampleCsvForLocale(locale), `english-demo-sample-${locale}.csv`)}
             onLiveDataFile={handleLiveDataFile}
             onLoadLiveSample={handleLoadLiveSample}
             setAnalysisReady={setAnalysisReady}
@@ -890,8 +595,6 @@ function App() {
         )}
         {activePanel === "results" && (
           <ResultsPanel
-            deepSeekApiKey={deepSeekApiKey}
-            deepSeekModel={deepSeekModel}
             essayCorrectionState={essayCorrectionState}
             essayFileName={essayFileName}
             essayText={essayText}
@@ -901,9 +604,11 @@ function App() {
               setSelectedQuestionId(id);
               setActivePanel("diagnosis");
             }}
-            setDeepSeekApiKey={setDeepSeekApiKey}
             setEssayFileName={setEssayFileName}
-            setEssayText={setEssayText}
+            setEssayText={(value) => {
+              setEssayText(value);
+              setEssayCorrectionState({ status: "idle", message: "文本已更改，请重新查看复核建议。", result: "" });
+            }}
           />
         )}
         {activePanel === "diagnosis" && (
@@ -938,16 +643,10 @@ function App() {
           <ImaAssistantPanel
             classSnapshot={classSnapshot}
             copiedImaText={copiedImaText}
-            deepSeekApiKey={deepSeekApiKey}
-            deepSeekModel={deepSeekModel}
-            deepSeekState={deepSeekState}
             liveSummary={liveSummary}
-            onDeepSeekGenerate={requestDeepSeek}
             question={selectedQuestion}
             selectedClass={selectedClass}
             setCopiedImaText={setCopiedImaText}
-            setDeepSeekApiKey={setDeepSeekApiKey}
-            setDeepSeekModel={setDeepSeekModel}
           />
         )}
         {activePanel === "practice" && (
@@ -1355,27 +1054,21 @@ function UploadPanel({
 }
 
 function ResultsPanel({
-  deepSeekApiKey,
-  deepSeekModel,
   essayCorrectionState,
   essayFileName,
   essayText,
   questions,
   onCorrectEssay,
   onSelectQuestion,
-  setDeepSeekApiKey,
   setEssayFileName,
   setEssayText,
 }: {
-  deepSeekApiKey: string;
-  deepSeekModel: string;
-  essayCorrectionState: DeepSeekState;
+  essayCorrectionState: EssayReviewState;
   essayFileName: string;
   essayText: string;
   questions: QuestionItem[];
   onCorrectEssay: () => void;
   onSelectQuestion: (id: string) => void;
-  setDeepSeekApiKey: (value: string) => void;
   setEssayFileName: (value: string) => void;
   setEssayText: (value: string) => void;
 }) {
@@ -1403,7 +1096,7 @@ function ResultsPanel({
     <div className="page-grid">
       <section className="metric-grid">
         <MetricCard icon={CircleCheck} label={t("自动判分")} tone="green" value={t("264份")} trend={t("选择题已完成")} />
-        <MetricCard icon={Brain} label={t("AI反馈")} tone="blue" value={t("72条")} trend={t("作文与续写建议")} />
+        <MetricCard icon={Brain} label={t("样例反馈")} tone="blue" value={t("72条")} trend={t("作文与续写建议")} />
         <MetricCard icon={Target} label={t("低分题")} tone="red" value={t("3题")} trend={t("正确率低于60%")} />
         <MetricCard icon={Download} label={t("导出")} tone="orange" value={t("Excel")} trend={t("班级与个人报告")} />
       </section>
@@ -1441,8 +1134,8 @@ function ResultsPanel({
       <section className="panel essay-live-panel">
         <PanelHeader
           icon={Sparkles}
-          title={t("作文批改试用台")}
-          action={t(deepSeekApiKey ? `DeepSeek · ${deepSeekModel}` : "无 Key 先看样例")}
+          title={t("作文复核工作台")}
+          action={t("本地样例与教师复核")}
         />
         <div className="essay-live-grid">
           <div className="essay-live-editor">
@@ -1450,19 +1143,6 @@ function ResultsPanel({
               <span>{t("作文/续写原文")}</span>
               <b>{essayFileName}</b>
             </div>
-            <label className="essay-key-row">
-              <span>DeepSeek Key</span>
-              <input
-                autoComplete="new-password"
-                maxLength={512}
-                onChange={(event) => setDeepSeekApiKey(event.target.value)}
-                placeholder={t("可选：粘贴 Key 后批改真实文本")}
-                spellCheck={false}
-                type="password"
-                value={deepSeekApiKey}
-              />
-              <small>{t(deepSeekApiKey ? "Key 仅在当前页面临时使用，刷新后自动清除。" : "不填 Key 会显示本地样例批改结果。")}</small>
-            </label>
             <textarea
               className="essay-live-input"
               aria-label={t("学生作文原文")}
@@ -1486,24 +1166,23 @@ function ResultsPanel({
                 <RefreshCw size={16} />{t("载入样例")}</button>
               <button
                 className="primary-button"
-                disabled={essayCorrectionState.status === "loading"}
                 onClick={onCorrectEssay}
                 type="button"
               >
                 <Sparkles size={16} />
-                {t(essayCorrectionState.status === "loading" ? "批改中" : "批改作文")}
+                {t("查看复核建议")}
               </button>
             </div>
-            <p className="essay-live-note">{t("点击批改才会把文本发送给 DeepSeek；发送前会在本地移除显式邮箱、电话、身份证号、姓名和学号字段。仍请先人工检查其他可识别信息。无 API Key 时会展示本地样例结果。")}</p>
+            <p className="essay-live-note">{t("本页不向外部服务发送作文。内置作文展示预设点评；自带文本仅提供教师复核清单，不自动生成分数。")}</p>
           </div>
-          <div className={`deepseek-output essay-correction-output ${essayCorrectionState.status}`}>
+          <div className={`local-review-output essay-correction-output ${essayCorrectionState.status}`}>
             <span>{t(essayCorrectionState.message)}</span>
-            <pre>{essayCorrectionState.status === "success" ? essayCorrectionState.result : t(essayCorrectionState.result || "这里会显示作文总评、40分制得分、片段批注、修改示范、同类微练习和教学启示。")}</pre>
+            <pre>{t(essayCorrectionState.result || "载入内置作文可查看样例点评；其他文本展示教师复核清单。")}</pre>
             <button
               className="secondary-button"
               disabled={!essayCorrectionState.result}
               onClick={() => {
-                void navigator.clipboard?.writeText(essayCorrectionState.status === "success" ? essayCorrectionState.result : t(essayCorrectionState.result));
+                void navigator.clipboard?.writeText(t(essayCorrectionState.result));
               }}
               type="button"
             >
@@ -1539,9 +1218,9 @@ function ResultsPanel({
                   </span>
                 ))}
               </div>
-              <a href={standard.sourceUrl} rel="noreferrer" target="_blank">
+              {standard.sourceUrl ? <a href={standard.sourceUrl} rel="noreferrer" target="_blank">
                 {t(standard.sourceLabel)} <ExternalLink size={13} />
-              </a>
+              </a> : <span>{t(standard.sourceLabel)}</span>}
             </article>
           ))}
         </div>
@@ -1637,7 +1316,7 @@ function ResultsPanel({
         </div>
         <div className="essay-revision">
           <div>
-            <span>{t("AI 修改建议 · 老师可编辑")}</span>
+            <span>{t("预设修改示例 · 需教师复核")}</span>
             <p>{t(essayWorkbench.revision)}</p>
           </div>
           <div className="teacher-control-list">
@@ -2384,29 +2063,17 @@ function ReportsPanel({
 function ImaAssistantPanel({
   classSnapshot,
   copiedImaText,
-  deepSeekApiKey,
-  deepSeekModel,
-  deepSeekState,
   liveSummary,
-  onDeepSeekGenerate,
   question,
   selectedClass,
   setCopiedImaText,
-  setDeepSeekApiKey,
-  setDeepSeekModel,
 }: {
   classSnapshot: (typeof classSnapshots)[number];
   copiedImaText: string;
-  deepSeekApiKey: string;
-  deepSeekModel: string;
-  deepSeekState: DeepSeekState;
   liveSummary: LiveDataSummary | null;
-  onDeepSeekGenerate: (mode: "test" | "teaching" | "practice" | "report") => void;
   question: QuestionItem;
   selectedClass: string;
   setCopiedImaText: (value: string) => void;
-  setDeepSeekApiKey: (value: string) => void;
-  setDeepSeekModel: (value: string) => void;
 }) {
   const { t } = useLocale();
   const learningSummary = t(buildImaLearningSummary({
@@ -2467,7 +2134,7 @@ function ImaAssistantPanel({
           <span className="hero-kicker">
             <Brain size={16} />{t("知识库桥接 · 不替代学情数据库")}</span>
           <h2>{t("把结构化学情结果带到ima里，用校本知识生成备课建议")}</h2>
-          <p>{t("学情平台负责本地解析、统计和跟踪；DeepSeek 可按匿名摘要生成讲评建议和同类练习；ima 适合承载课标、教材、试卷讲评和教研记录。")}</p>
+          <p>{t("本平台只在本地解析成绩和整理摘要。教师可自行复核并复制匿名摘要，是否粘贴到外部工具由教师决定。")}</p>
           <div className="hero-actions">
             <a className="primary-button ima-open-link" href="https://ima.qq.com/" rel="noreferrer" target="_blank">
               <ExternalLink size={16} />{t("打开 ima")}</a>
@@ -2492,79 +2159,8 @@ function ImaAssistantPanel({
         <div className="ima-privacy-card">
           {imaCopyError && <p role="status">{t(imaCopyError)}</p>}
           <ShieldCheck size={22} />
-          <strong>{t("API边界")}</strong>
-          <p>{t("DeepSeek Key 只保存在当前页面内存；点击生成时才会把匿名学情摘要发送到 DeepSeek。未填 Key 时自动使用本地演示结果。")}</p>
-        </div>
-      </section>
-
-      <section className="panel deepseek-panel">
-        <PanelHeader icon={Sparkles} title={t("DeepSeek API 接入")} action={t("可选 · 演示时临时填写")} />
-        <div className="deepseek-grid">
-          <div className="deepseek-settings">
-            <label>
-              <span>API Key</span>
-              <input
-                autoComplete="new-password"
-                maxLength={512}
-                onChange={(event) => setDeepSeekApiKey(event.target.value)}
-                placeholder={t("sk-... 仅在当前页面临时使用")}
-                spellCheck={false}
-                type="password"
-                value={deepSeekApiKey}
-              />
-            </label>
-            <label>
-              <span>{t("模型")}</span>
-              <select value={deepSeekModel} onChange={(event) => setDeepSeekModel(event.target.value)}>
-                <option value="deepseek-v4-flash">{t("deepseek-v4-flash（推荐演示）")}</option>
-                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-              </select>
-            </label>
-            <div className="deepseek-actions">
-              <button
-                className="secondary-button"
-                disabled={deepSeekState.status === "loading"}
-                onClick={() => onDeepSeekGenerate("test")}
-                type="button"
-              >
-                <CircleCheck size={16} />{t("测试连接")}</button>
-              <button
-                className="primary-button"
-                disabled={deepSeekState.status === "loading"}
-                onClick={() => onDeepSeekGenerate("teaching")}
-                type="button"
-              >
-                <Sparkles size={16} />{t("生成教学建议")}</button>
-              <button
-                className="secondary-button"
-                disabled={deepSeekState.status === "loading"}
-                onClick={() => onDeepSeekGenerate("practice")}
-                type="button"
-              >
-                <BookOpenCheck size={16} />{t("生成同类题")}</button>
-              <button
-                className="secondary-button"
-                disabled={deepSeekState.status === "loading"}
-                onClick={() => onDeepSeekGenerate("report")}
-                type="button"
-              >
-                <FileText size={16} />{t("生成汇报话术")}</button>
-            </div>
-            <p className="deepseek-note">{t("浏览器直连只适合 demo，请使用单独的低额度临时 Key；正式产品应改为学校服务器代理，并加入权限、审计和脱敏策略。")}</p>
-          </div>
-          <div className={`deepseek-output ${deepSeekState.status}`}>
-            <span>{t(deepSeekState.message)}</span>
-            <pre>{deepSeekState.status === "success" ? deepSeekState.result : t(deepSeekState.result || "这里会显示 DeepSeek 返回内容；没有 API Key 时会展示本地回退建议。")}</pre>
-            <button
-              className="secondary-button"
-              disabled={!deepSeekState.result}
-              onClick={() => {
-                void navigator.clipboard?.writeText(deepSeekState.status === "success" ? deepSeekState.result : t(deepSeekState.result));
-              }}
-              type="button"
-            >
-              <ClipboardCheck size={16} />{t("复制结果")}</button>
-          </div>
+          <strong>{t("本地处理")}</strong>
+          <p>{t("没有密钥输入或在线生成功能。复制摘要不会自动发送数据；外部工具有其独立的数据规则。")}</p>
         </div>
       </section>
 

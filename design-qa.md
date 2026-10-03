@@ -30,7 +30,7 @@ The source and final desktop/mobile screenshots were opened together in the same
 No unresolved P0/P1/P2 findings remain in the visual-refresh scope.
 
 1. Earlier mobile filters and role-switch styling inherited full-width rules. Scoped flex sizing now keeps them within the viewport. Verified again in `merged-390-总览.png`.
-2. Earlier narrow layouts inherited a 320px body minimum plus a two-column essay Key row. Removed the body minimum and stacked the Key row on small screens. Verified in `merged-320-批改.png` and all nine 320px panel checks.
+2. Earlier narrow layouts inherited a 320px body minimum plus a two-column essay form. Removed the body minimum and stacked the form on small screens. Verified in `merged-320-批改.png` and all nine 320px panel checks.
 3. Earlier chart mounts reported negative initial dimensions. Explicit Recharts initial dimensions preserve responsive resizing without these warnings. The post-merge browser console contains no warning/error entries during the 36-state sweep.
 4. Earlier navigation crowded or omitted mobile destinations. The bottom bar now has four primary destinations plus a complete modal menu. All nine pages are reachable at 768px, 390px, and 320px.
 5. Removed the institutional-looking brand icon and graduation-cap favicon. Source scan and DOM checks found no school/graduation-cap icons. The generated notebook photograph contains no school branding.

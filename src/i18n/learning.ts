@@ -314,7 +314,6 @@ export const learningEnglish: Record<string, string> = {
   "情节过短且缺少原文衔接": "Underdeveloped plot with weak links to the passage",
   "所有样本都有题型、预期档位、预期分数和主要问题标签。": "Each sample includes its task type, expected band, expected score and main issue.",
   "样本覆盖应用文与读后续写，包含高分、中高分、临界和低分文本。": "Samples cover functional writing and continuation tasks at high, upper-middle, borderline and low levels.",
-  "本地批量测试只验证 rubric 映射、数据完整性和提示词长度，不批量消耗 DeepSeek Key。": "Local batch tests check rubric mapping, data completeness and prompt length. They do not make paid DeepSeek requests.",
   "学业预警": "Learning alerts",
   "连续两次低于班均、订正未完成、同错因重复出现": "Repeated below-average scores, incomplete corrections or recurring errors",
   "自动进入教师跟进清单，生成面批或分层练习任务。": "Flag students for teacher follow-up and plan feedback or differentiated practice.",

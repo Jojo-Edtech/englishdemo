@@ -732,8 +732,8 @@ export const writingRubricStandards: WritingRubricStandard[] = [
     title: "应用文写作评分标准",
     examUse: "新高考英语写作第一节 · 15分",
     totalScore: 15,
-    sourceLabel: "公开应用文写作评分标准整理",
-    sourceUrl: "https://cdn.zizzs.com/1732670651241%E5%B1%B1%E4%B8%9C%E6%BD%8D%E5%9D%8A2025%E5%B1%8A%E9%AB%98%E4%B8%8911%E6%9C%88%E6%9C%9F%E4%B8%AD%E8%8B%B1%E8%AF%AD%E7%AD%94%E6%A1%88.pdf",
+    sourceLabel: "教学演示量规 需教师核对正式标准",
+    sourceUrl: "",
     summary:
       "重点看交际任务是否完成、要点是否覆盖、格式语气是否得体，以及词汇语法是否准确自然。",
     dimensions: [
@@ -776,8 +776,8 @@ export const writingRubricStandards: WritingRubricStandard[] = [
     title: "读后续写评分标准",
     examUse: "新高考英语写作第二节 · 25分",
     totalScore: 25,
-    sourceLabel: "公开读后续写评分维度整理",
-    sourceUrl: "https://flts.bnu.edu.cn/node/12699",
+    sourceLabel: "教学演示量规 需教师核对正式标准",
+    sourceUrl: "",
     summary:
       "重点看续写内容与原文融洽度、情节合理性、人物情感线、语言丰富性和段落衔接。",
     dimensions: [
@@ -934,7 +934,7 @@ export const essayStressSummary = {
   passCriteria: [
     "所有样本都有题型、预期档位、预期分数和主要问题标签。",
     "样本覆盖应用文与读后续写，包含高分、中高分、临界和低分文本。",
-    "本地批量测试只验证 rubric 映射、数据完整性和提示词长度，不批量消耗 DeepSeek Key。",
+    "本地批量测试只验证量规映射、数据完整性和文本长度。",
   ],
 };
 

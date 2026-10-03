@@ -1,21 +1,3 @@
-export const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-export const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
-
-const ALLOWED_DEEPSEEK_MODELS = new Set([DEFAULT_DEEPSEEK_MODEL, "deepseek-v4-pro"]);
-
-/** @param {unknown} value */
-export function normalizeDeepSeekModel(value) {
-  const model = String(value ?? "").trim();
-  return ALLOWED_DEEPSEEK_MODELS.has(model) ? model : DEFAULT_DEEPSEEK_MODEL;
-}
-
-/** @param {unknown} value */
-export function normalizeTemporaryApiKey(value) {
-  const key = String(value ?? "").trim();
-  if (key.length < 10 || key.length > 512 || /[\u0000-\u001f\u007f]/u.test(key)) return "";
-  return key;
-}
-
 /** @param {unknown} value @param {number} index */
 export function safeAggregateMetricLabel(value, index) {
   const field = String(value ?? "").replace(/[\u0000-\u001f\u007f]/gu, " ").trim();
